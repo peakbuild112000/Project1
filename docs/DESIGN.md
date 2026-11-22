@@ -3,7 +3,7 @@
 ## Goal
 A difficult cooperative/competitive 3D climbing game for 1–4 players. The round lasts as long as players survive and climb; falling costs a life and a time penalty. Players spawn in a cabin, leave it to bring a huge water bucket from the summit back home without spilling it. Delivering any remaining water to the cabin wins the match; emptying the bucket fails the delivery. Carrying objects, the bucket or climbers costs stamina and builds effort; if the effort overloads, the climber loses their grip and ragdolls. There is no ball mode and no manual stretch action.
 
-Browsers cannot host ENet/UDP, so the Web build uses `start_solo()` and the main menu's **SOLO** button. Desktop builds keep the full host/join flow.
+Browsers cannot host ENet/UDP, so the Web build uses `start_solo()` and the main menu's **PLAY SOLO** button. `scripts/ui/main_menu.gd` detects Web with `OS.has_feature("web")`, hides **HOST** and **JOIN**, and `scripts/network/network_manager.gd` rejects direct `create_server()` / `join_server()` calls there. Desktop builds keep the full host/join flow.
 
 ## Shared contracts
 

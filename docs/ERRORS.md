@@ -201,12 +201,32 @@ All harnesses use `$serverProc` and `$clientProc`. Never stop every Godot
 console process with `Get-Process ... | Stop-Process -Force`; track the exact PIDs
 returned by `Start-Process -PassThru`.
 
-## 12. Web export needed an explicit preset
+## 12. Web export and the "Unable to host on port 7777" demo error
 
 Godot cannot export Web from the command line without a preset. The repository
-now contains `export_presets.cfg` with a `Web` preset. ENet uses UDP and is not
-available in browsers, so the web demo uses the new `SOLO` button, which starts
-an `OfflineMultiplayerPeer` match. Desktop builds keep the full host/join flow.
+contains `export_presets.cfg` with a `Web` preset.
+
+**Symptom in the first Web build**
+
+Clicking **HOST** in the browser produced:
+
+```text
+Unable to host on port 7777: ...
+```
+
+**Cause**
+
+ENet uses UDP sockets, which browsers do not expose. The button was still
+available in the Web menu, so Godot tried to create a UDP server and failed.
+
+**Fix**
+
+`scripts/ui/main_menu.gd` checks `OS.has_feature("web")`. In the Web build it
+hides **HOST** and **JOIN**, shows a browser-mode notice, and renames **SOLO** to
+**PLAY SOLO**. `scripts/network/network_manager.gd` also rejects `create_server()`
+and `join_server()` on Web with a clear message, even if called directly. The
+Web build uses `OfflineMultiplayerPeer` only. Desktop builds keep the full
+host/join flow and port `7777`.
 
 ## 13. Static quality checks
 

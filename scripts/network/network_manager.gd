@@ -48,6 +48,9 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------
 
 func create_server(p_player_name: String, p_max_players: int = 4, p_port: int = 7777) -> void:
+	if OS.has_feature("web"):
+		connection_failed.emit("ENet hosting is not available in the browser. Use SOLO mode.")
+		return
 	_reset_transport(false)
 	player_name = _clean_name(p_player_name)
 	if player_name.is_empty():
@@ -76,6 +79,9 @@ func create_server(p_player_name: String, p_max_players: int = 4, p_port: int = 
 
 
 func join_server(p_player_name: String, address: String, p_port: int = 7777) -> void:
+	if OS.has_feature("web"):
+		connection_failed.emit("ENet joining is not available in the browser. Use SOLO mode.")
+		return
 	_reset_transport(false)
 	player_name = _clean_name(p_player_name)
 	if player_name.is_empty():

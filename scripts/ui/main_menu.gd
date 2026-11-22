@@ -1,6 +1,7 @@
 extends Control
 
 const DEFAULT_HINT := "Local play: 127.0.0.1  -  Ask your host for their address."
+const WEB_HINT := "Browser demo: ENet/UDP is unavailable here. Use SOLO. Full multiplayer needs the desktop build."
 const DEFAULT_DISPLAY_NAME := "Climber"
 const MENU_WIDTH := 560.0
 const LOBBY_WIDTH := 920.0
@@ -15,6 +16,10 @@ var _port_field: SpinBox
 var _players_option: OptionButton
 var _error_label: Label
 var _hint_label: Label
+var _host_button: Button
+var _join_button: Button
+var _solo_button: Button
+var _is_web := false
 
 var _player_list: VBoxContainer
 var _chat_log: RichTextLabel
@@ -28,6 +33,7 @@ var _host_tag: Label
 
 func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	_is_web = OS.has_feature("web")
 	_build_ui()
 	_connect_net_signals()
 	_show_menu()
@@ -114,10 +120,7 @@ func _build_menu_panel() -> PanelContainer:
 	_name_field = _make_field("Your display name", DEFAULT_DISPLAY_NAME)
 	inner.add_child(_make_row("Display name", _name_field))
 
-	inner.add_child(_make_section("CONNECTION"))
 	_address_field = _make_field("IP address", "127.0.0.1")
-	inner.add_child(_make_row("IP address", _address_field))
-
 	_port_field = SpinBox.new()
 	_port_field.min_value = 1
 	_port_field.max_value = 65535
@@ -125,7 +128,6 @@ func _build_menu_panel() -> PanelContainer:
 	_port_field.value = 7777
 	_port_field.custom_minimum_size = Vector2(0, 44)
 	_port_field.add_theme_font_size_override("font_size", 15)
-	inner.add_child(_make_row("Port", _port_field))
 
 	_players_option = OptionButton.new()
 	_players_option.custom_minimum_size = Vector2(0, 44)
@@ -134,31 +136,47 @@ func _build_menu_panel() -> PanelContainer:
 	_players_option.add_item("4 players", 4)
 	_players_option.select(2)
 	_players_option.add_theme_font_size_override("font_size", 15)
-	inner.add_child(_make_row("Max players", _players_option))
+
+	if _is_web:
+		inner.add_child(_make_section("BROWSER MODE"))
+	else:
+		inner.add_child(_make_section("CONNECTION"))
+		inner.add_child(_make_row("IP address", _address_field))
+		inner.add_child(_make_row("Port", _port_field))
+		inner.add_child(_make_row("Max players", _players_option))
 
 	_error_label = _make_label("", 15, Color(1.0, 0.36, 0.36), true)
 	_error_label.custom_minimum_size = Vector2(0, 24)
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inner.add_child(_error_label)
 
-	_hint_label = _make_label(DEFAULT_HINT, 13, Color(0.55, 0.67, 0.78))
+	_hint_label = _make_label(WEB_HINT if _is_web else DEFAULT_HINT, 13, Color(0.55, 0.67, 0.78))
 	_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inner.add_child(_hint_label)
 
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 8)
-	buttons.add_child(_make_button("HOST", "host"))
-	buttons.add_child(_make_button("JOIN", "join"))
-	buttons.add_child(_make_button("SOLO", "primary"))
-	buttons.add_child(_make_button("QUIT", "danger"))
+	_host_button = _make_button("HOST", "host")
+	_join_button = _make_button("JOIN", "join")
+	_solo_button = _make_button("SOLO", "primary")
+	var quit_button := _make_button("QUIT", "danger")
+	buttons.add_child(_host_button)
+	buttons.add_child(_join_button)
+	buttons.add_child(_solo_button)
+	buttons.add_child(quit_button)
 	for button in buttons.get_children():
 		(button as Button).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inner.add_child(buttons)
 
-	(buttons.get_child(0) as Button).pressed.connect(_on_host_pressed)
-	(buttons.get_child(1) as Button).pressed.connect(_on_join_pressed)
-	(buttons.get_child(2) as Button).pressed.connect(_on_solo_pressed)
-	(buttons.get_child(3) as Button).pressed.connect(_on_quit_pressed)
+	_host_button.pressed.connect(_on_host_pressed)
+	_join_button.pressed.connect(_on_join_pressed)
+	_solo_button.pressed.connect(_on_solo_pressed)
+	quit_button.pressed.connect(_on_quit_pressed)
+
+	if _is_web:
+		_host_button.hide()
+		_join_button.hide()
+		_solo_button.text = "PLAY SOLO"
 
 	return panel
 
@@ -413,7 +431,7 @@ func _show_menu() -> void:
 	_lobby_panel.hide()
 	_menu_panel.show()
 	_error_label.text = ""
-	_hint_label.text = DEFAULT_HINT
+	_hint_label.text = WEB_HINT if _is_web else DEFAULT_HINT
 	_ready_button.text = "READY"
 	_ready_button.disabled = false
 	_ready_button.self_modulate = Color.WHITE

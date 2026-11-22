@@ -9,9 +9,9 @@ procedural mountain, bring a huge water bucket back to your cabin without
 spilling it, survive falls, use the environment and your friends as stepping
 stones, and try not to ragdoll in front of everyone.
 
-> The Web demo runs a solo match: open the demo and click **SOLO**. Browsers do
-> not allow ENet/UDP hosting, so the full host/join multiplayer flow requires a
-> desktop build.
+> The Web demo runs a solo match: open the demo and click **PLAY SOLO**.
+> Browsers do not allow ENet/UDP sockets, so **HOST** and **JOIN** are hidden in
+> the Web menu. The full host/join multiplayer flow requires a desktop build.
 
 ## Contents
 
@@ -35,8 +35,9 @@ The GitHub Pages build is published at:
 <https://peakbuild112000.github.io/Project1/>
 
 Recommended browser: a recent Chrome, Edge, Firefox or Safari with WebGL2
-enabled. Click **SOLO** on the main menu to start a local match. Desktop players
-can still use **HOST**, **JOIN** and the default port `7777`.
+enabled. Click **PLAY SOLO** on the main menu to start a local match. **HOST**
+and **JOIN** are hidden in the Web build because browsers cannot open ENet/UDP
+sockets; desktop players can use them with the default port `7777`.
 
 ## Features
 
@@ -169,7 +170,7 @@ New-Item "$env:TEMP\opencode\gh-pages\.nojekyll" -ItemType File -Force | Out-Nul
 ```
 
 ENet is desktop-only. The web build uses `OfflineMultiplayerPeer` through the
-**SOLO** button.
+**PLAY SOLO** button and hides **HOST**/**JOIN** so no port error can occur.
 
 ## Project layout
 
