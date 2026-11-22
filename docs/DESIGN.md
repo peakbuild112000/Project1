@@ -1,7 +1,9 @@
 # Climb Together — design contract
 
 ## Goal
-A difficult cooperative/competitive 3D climbing game for 1–4 players. The round lasts as long as players survive and climb; falling costs a life and a time penalty. Players spawn in a cabin, leave it to bring a huge water bucket from the summit back home without spilling it. Carrying objects, the bucket or climbers costs stamina and builds effort; if the effort overloads, the climber loses their grip and ragdolls. There is no ball mode and no manual stretch action.
+A difficult cooperative/competitive 3D climbing game for 1–4 players. The round lasts as long as players survive and climb; falling costs a life and a time penalty. Players spawn in a cabin, leave it to bring a huge water bucket from the summit back home without spilling it. Delivering any remaining water to the cabin wins the match; emptying the bucket fails the delivery. Carrying objects, the bucket or climbers costs stamina and builds effort; if the effort overloads, the climber loses their grip and ragdolls. There is no ball mode and no manual stretch action.
+
+Browsers cannot host ENet/UDP, so the Web build uses `start_solo()` and the main menu's **SOLO** button. Desktop builds keep the full host/join flow.
 
 ## Shared contracts
 
@@ -13,6 +15,7 @@ A difficult cooperative/competitive 3D climbing game for 1–4 players. The roun
   - `create_server(player_name: String, max_players: int = 4, port: int = 7777) -> void`
   - `join_server(player_name: String, address: String, port: int = 7777) -> void`
   - `start_match() -> void` (host only; changes every peer to `res://scenes/game.tscn`)
+  - `start_solo() -> void` (starts a match with `OfflineMultiplayerPeer`; used by the Web demo and by solo players)
   - `leave() -> void`
   - `set_ready(ready: bool) -> void`
   - `send_chat(message: String) -> void`
@@ -69,3 +72,4 @@ A difficult cooperative/competitive 3D climbing game for 1–4 players. The roun
 - No TODO/FIXME/placeholder/stub text, no empty source files.
 - Godot 4.6 headless import and scripts must parse without errors.
 - Gameplay must be understandable from the HUD alone.
+- `tests/run_tests.ps1` runs the import, headless regression harnesses and static checks. Expected result: `RESULT PASSED` with all `failures=0`, `STATIC BAD: 0` and `EMPTY FILES: 0`.
