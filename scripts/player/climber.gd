@@ -12,9 +12,16 @@ signal landed
 signal anchor_changed
 signal carry_changed(kind: int, target_id: String)
 signal jetpack_changed(equipped: bool, fuel: float)
+signal bandages_changed(count: int)
+signal injury_changed(value: float)
+signal stamina_lock_changed(value: float)
+signal fall_damage(amount: float, impact_speed: float)
+signal unconscious_changed(value: bool)
+signal revived(peer_id: int)
 signal notice_requested(text: String)
 
 const MAX_STRETCH: float = 1.4
+const MIN_USABLE_STAMINA: float = 10.0
 const OVERLOAD_THRESHOLD: float = 0.85
 const OVERLOAD_TIME: float = 1.1
 const FALL_LIMIT_Y: float = -12.0
@@ -48,8 +55,6 @@ class ArmAnchor:
 @export var checkpoint_y: float = 0.0
 @export var replicated_position: Vector3 = Vector3.ZERO
 @export var replicated_yaw: float = 0.0
-@export var lives: int = 3
-@export var max_lives: int = 3
 
 @export_group("Nodes")
 @export var camera_pivot: Node3D
@@ -61,7 +66,7 @@ class ArmAnchor:
 @export var jetpack_visual: Node3D
 
 @export_group("Harpoon")
-@export var harpoon_reach: float = 35.0
+@export var harpoon_reach: float = 14.0
 @export var climbable_mask: int = 1
 @export var pull_force: float = 620.0
 @export var arm_damping: float = 30.0
@@ -93,6 +98,7 @@ class ArmAnchor:
 
 @export_group("Carry")
 @export var carry_reach: float = 3.6
+@export var fix_reach: float = 4.5
 @export var carry_drain_base: float = 5.0
 @export var carry_drain_per_kg: float = 0.28
 @export var carry_stretch_gain: float = 0.35
@@ -106,14 +112,42 @@ class ArmAnchor:
 @export var jetpack_fuel_max: float = 100.0
 
 @export_group("Stamina and stretch")
-@export var stamina_regen: float = 30.0
-@export var stretch_gain: float = 0.14
+@export var stamina_regen: float = 24.0
+@export var stretch_gain: float = 0.16
 @export var stretch_recovery: float = 0.55
 @export var stretched_drain: float = 12.0
 @export var single_arm_drain: float = 11.0
 @export var double_arm_drain: float = 6.0
 @export var exhausted_threshold: float = 12.0
 @export var invulnerability_time: float = 0.9
+
+@export_group("Condition")
+@export var fall_damage_min_speed: float = 10.0
+@export var fall_damage_per_speed: float = 3.0
+@export var fall_damage_max: float = 85.0
+## The longer a drop lasts, the harder gravity pulls and the less drag applies.
+@export var fall_accel_per_second: float = 14.0
+@export var fall_accel_max_time: float = 2.6
+@export var fall_damp_min: float = 0.14
+@export var fall_speed_cap: float = 70.0
+@export var fall_damage_per_second: float = 4.5
+@export var long_fall_notice_time: float = 1.4
+@export var injury_regen_penalty: float = 0.75
+@export var hazard_damage_base: float = 7.0
+@export var hazard_damage_per_impulse: float = 0.35
+@export var hazard_damage_max: float = 20.0
+@export var hazard_injury_scale: float = 0.008
+## Enemy strikes lock this share of their stamina damage permanently.
+@export var enemy_stamina_lock_scale: float = 1.0
+@export var starting_bandages: int = 0
+@export var bandage_heal: float = 30.0
+@export var bandage_injury_relief: float = 0.6
+## A badly hurt climber collapses if another fall empties the usable bar.
+@export var critical_injury: float = 0.55
+@export var critical_lock_ratio: float = 0.45
+## Seconds a downed climber survives without being carried or bandaged.
+@export var unconscious_death_time: float = 20.0
+@export var jetpack_mass_kg: float = 12.0
 
 @export_group("Progress")
 @export var checkpoint_interval: float = 20.0
@@ -144,6 +178,26 @@ var was_grounded: bool = true
 var summit_emitted: bool = false
 var visual_send_timer: float = 0.0
 
+var injury: float = 0.0
+## Stamina lost to hard falls. It stays red in the HUD and cannot be used again
+## until a bandage restores it. It is not refilled by respawning or recovering.
+var stamina_lock: float = 0.0
+var bandages: int = 0
+## Downed but still alive: a teammate can carry this climber and spend a bandage
+## to bring them back. Ragdoll is the visual state, unconscious is the game state.
+var unconscious: bool = false
+## In multiplayer a downed climber waits for a bandage; solo matches still recover.
+var persistent_unconscious: bool = false
+## Death countdown: only advances while down and not carried by a teammate.
+var unconscious_time: float = 0.0
+var death_progress: float = 0.0
+var _death_notice_stage: int = 0
+## Seconds spent falling without ground or a rope. Drives acceleration and damage.
+var fall_time: float = 0.0
+var normal_linear_damp: float = 1.0
+var _shadow: MeshInstance3D = null
+var _shadow_ray_length: float = 14.0
+
 var _remote_position_ready: bool = false
 var _remote_left_point: Vector3 = Vector3.ZERO
 var _remote_right_point: Vector3 = Vector3.ZERO
@@ -153,6 +207,9 @@ var _default_physics_material: PhysicsMaterial
 var _carry_node: Node = null
 var _carrier_node: Node = null
 var _jetpack_flame: MeshInstance3D = null
+var _left_foot: MeshInstance3D = null
+var _right_foot: MeshInstance3D = null
+var _tail_body: RigidBody3D = null
 var _prop_report_timer: float = 0.0
 var _prop_pull_timer: float = 0.0
 var _pending_prop_pulls: Dictionary = {}
@@ -162,6 +219,7 @@ func _ready() -> void:
 	add_to_group("climbers")
 	can_sleep = false
 	linear_damp = 1.0
+	normal_linear_damp = linear_damp
 	angular_damp = 4.0
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0.0, 0.12, 0.0)
@@ -175,15 +233,22 @@ func _ready() -> void:
 
 	_resolve_nodes()
 	_setup_jetpack_visual()
+	_setup_shadow()
+	bandages = maxi(0, starting_bandages)
 	_apply_color()
 	_configure_synchronizer()
 	_apply_authority_mode()
 	_refresh_visuals()
 	stamina_changed.emit(current_stamina, max_stamina)
+	stamina_lock_changed.emit(stamina_lock)
 	stretch_changed.emit(stretch, stretch >= OVERLOAD_THRESHOLD)
+	bandages_changed.emit(bandages)
+	injury_changed.emit(injury)
 
 
 func _exit_tree() -> void:
+	if _shadow != null and is_instance_valid(_shadow):
+		_shadow.queue_free()
 	if is_local and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -211,9 +276,17 @@ func get_state() -> Dictionary:
 		"velocity": linear_velocity,
 		"stamina": current_stamina,
 		"max_stamina": max_stamina,
+		"stamina_lock": stamina_lock,
+		"usable_max_stamina": usable_max_stamina(),
 		"stretch": stretch,
 		"overloaded": stretch >= OVERLOAD_THRESHOLD,
 		"ragdoll_active": ragdoll_active,
+		"unconscious": unconscious,
+		"persistent_unconscious": persistent_unconscious,
+		"unconscious_time": unconscious_time,
+		"death_progress": death_progress,
+		"death_time_left": get_death_time_left(),
+		"fall_time": fall_time,
 		"carry_kind": carry_kind,
 		"carry_target_id": carry_target_id,
 		"carried_by_peer": carried_by_peer,
@@ -224,14 +297,13 @@ func get_state() -> Dictionary:
 		"grounded": grounded,
 		"highest_y": highest_y,
 		"checkpoint_y": checkpoint_y,
-		"lives": lives,
 		"is_local": is_local,
 		"dead": dead,
 		"stunned": stun_timer > 0.0,
 	}
 
 
-func respawn_at(pos: Vector3, restore_life: bool = false) -> void:
+func respawn_at(pos: Vector3, _unused: bool = false) -> void:
 	dead = false
 	control_disabled = false
 	stun_timer = 0.0
@@ -243,7 +315,10 @@ func respawn_at(pos: Vector3, restore_life: bool = false) -> void:
 	if ragdoll_active and ragdoll_rig != null:
 		ragdoll_rig.call("deactivate")
 	ragdoll_active = false
+	unconscious = false
 	ragdoll_timer = 0.0
+	_reset_unconscious_timer()
+	_reset_fall_state()
 	_release_arm(true)
 	_release_arm(false)
 	_clear_carry_local()
@@ -251,9 +326,11 @@ func respawn_at(pos: Vector3, restore_life: bool = false) -> void:
 	_carrier_node = null
 	stretch = 0.0
 	stretch_overload_timer = 0.0
-	current_stamina = max_stamina
-	if restore_life:
-		lives = max_lives
+	# Fall damage is permanent until a bandage is used: respawning refills only
+	# the still-usable part of the bar, not the red locked part.
+	current_stamina = usable_max_stamina()
+	injury = 0.0
+	injury_changed.emit(injury)
 
 	_apply_freeze()
 	global_transform = Transform3D(Basis.IDENTITY, pos)
@@ -265,7 +342,9 @@ func respawn_at(pos: Vector3, restore_life: bool = false) -> void:
 	checkpoint_y = pos.y
 	_refresh_visuals()
 	stamina_changed.emit(current_stamina, max_stamina)
+	stamina_lock_changed.emit(stamina_lock)
 	stretch_changed.emit(stretch, false)
+	unconscious_changed.emit(false)
 
 
 func apply_hazard(impulse: Vector3, label: String) -> void:
@@ -277,8 +356,45 @@ func apply_hazard(impulse: Vector3, label: String) -> void:
 			parts[0].apply_central_impulse(impulse * parts[0].mass * 0.5)
 	elif is_local and not freeze:
 		apply_central_impulse(impulse * mass)
+
+	# There is no health pool: every hit is paid for directly with stamina.
+	# The short cooldown stops wind zones from draining it every physics frame.
+	var loss := clampf(
+		hazard_damage_base + impulse.length() * hazard_damage_per_impulse,
+		0.0,
+		hazard_damage_max
+	)
+	current_stamina = maxf(0.0, current_stamina - loss)
+	injury = clampf(injury + loss * hazard_injury_scale, 0.0, 1.0)
 	stun_timer = 0.4
-	notice_requested.emit(label)
+	invulnerability_timer = maxf(invulnerability_timer, 0.45)
+	stamina_changed.emit(current_stamina, max_stamina)
+	injury_changed.emit(injury)
+	notice_requested.emit("%s -%d STAMINA" % [label, int(loss)])
+
+
+## Enemy contact is worse than a gust: the stolen stamina is locked red until
+## a bandage is spent. It never comes back through standing still.
+func apply_enemy_strike(amount: float, impulse: Vector3) -> void:
+	if dead or invulnerability_timer > 0.0:
+		return
+	if ragdoll_active and ragdoll_rig != null and ragdoll_rig.has_method("get_parts"):
+		var parts: Array = ragdoll_rig.call("get_parts")
+		if not parts.is_empty():
+			parts[0].apply_central_impulse(impulse * parts[0].mass * 0.5)
+	elif is_local and not freeze:
+		apply_central_impulse(impulse * mass)
+	var loss := clampf(maxf(0.0, amount) * enemy_stamina_lock_scale, 0.0, fall_damage_max)
+	if loss <= 0.0:
+		return
+	current_stamina = maxf(0.0, current_stamina - loss)
+	set_stamina_lock(stamina_lock + loss)
+	injury = clampf(injury + loss * hazard_injury_scale * 2.0, 0.0, 1.0)
+	stun_timer = 0.4
+	invulnerability_timer = maxf(invulnerability_timer, 0.8)
+	stamina_changed.emit(current_stamina, max_stamina)
+	injury_changed.emit(injury)
+	notice_requested.emit("ENEMY HIT -%d STAMINA LOCKED" % int(loss))
 
 
 func apply_bounce(impulse: Vector3, label: String) -> void:
@@ -304,12 +420,16 @@ func start_ragdoll() -> void:
 	var body_velocity: Vector3 = linear_velocity
 	var kick: float = stretch
 	ragdoll_active = true
+	unconscious = true
+	_reset_fall_state()
 	freeze = true
 	if ragdoll_rig != null:
 		ragdoll_rig.call("activate", body_xform, body_velocity, kick, player_color)
 	_refresh_visuals()
 	ragdoll_timer = ragdoll_duration
+	_reset_unconscious_timer()
 	stretch_overload_timer = 0.0
+	unconscious_changed.emit(true)
 	current_stamina = maxf(0.0, current_stamina - 12.0)
 	stun_timer = 0.0
 	ragdoll_started.emit()
@@ -323,13 +443,16 @@ func recover() -> void:
 		ragdoll_rig.call("deactivate")
 	var upright_position: Vector3 = global_position + (Vector3.UP * 0.2)
 	ragdoll_active = false
+	unconscious = false
 	control_disabled = false
 	ragdoll_timer = 0.0
+	_reset_unconscious_timer()
+	_reset_fall_state()
 	stretch = 0.0
 	stretch_overload_timer = 0.0
 	_release_arm(true)
 	_release_arm(false)
-	current_stamina = maxf(current_stamina, max_stamina * 0.35)
+	current_stamina = maxf(current_stamina, usable_max_stamina() * 0.35)
 	_apply_freeze()
 	global_transform = Transform3D(Basis.IDENTITY, upright_position)
 	replicated_position = upright_position
@@ -339,11 +462,27 @@ func recover() -> void:
 	invulnerability_timer = invulnerability_time
 	_refresh_visuals()
 	ragdoll_ended.emit()
+	unconscious_changed.emit(false)
 	notice_requested.emit("RECOVERED")
 
 
+## The usable ceiling is the full bar minus the permanently damaged red part.
+func usable_max_stamina() -> float:
+	return maxf(MIN_USABLE_STAMINA, max_stamina - maxf(0.0, stamina_lock))
+
+
+func set_stamina_lock(value: float) -> void:
+	var bounded: float = clampf(value, 0.0, maxf(0.0, max_stamina - MIN_USABLE_STAMINA))
+	if is_equal_approx(bounded, stamina_lock):
+		return
+	stamina_lock = bounded
+	current_stamina = minf(current_stamina, usable_max_stamina())
+	stamina_lock_changed.emit(stamina_lock)
+	stamina_changed.emit(current_stamina, max_stamina)
+
+
 func set_current_stamina(value: float) -> void:
-	var bounded: float = clampf(value, 0.0, maxf(1.0, max_stamina))
+	var bounded: float = clampf(value, 0.0, usable_max_stamina())
 	if is_equal_approx(bounded, current_stamina):
 		return
 	current_stamina = bounded
@@ -388,6 +527,12 @@ func _resolve_nodes() -> void:
 		head_mesh = get_node_or_null("Head") as MeshInstance3D
 	if jetpack_visual == null:
 		jetpack_visual = get_node_or_null("JetpackVisual") as Node3D
+	if _left_foot == null:
+		_left_foot = get_node_or_null("LeftFoot") as MeshInstance3D
+	if _right_foot == null:
+		_right_foot = get_node_or_null("RightFoot") as MeshInstance3D
+	if _tail_body == null:
+		_tail_body = find_child("Tail", true, false) as RigidBody3D
 
 
 func _configure_synchronizer() -> void:
@@ -414,7 +559,6 @@ func _configure_synchronizer() -> void:
 		"player_color",
 		"highest_y",
 		"checkpoint_y",
-		"lives",
 	]
 	for path in paths:
 		config.add_property(NodePath(".:" + path))
@@ -472,6 +616,12 @@ func _apply_color() -> void:
 		left_arm.call("set_color", player_color)
 	if right_arm != null and right_arm.has_method("set_color"):
 		right_arm.call("set_color", player_color)
+	if _left_foot != null:
+		_left_foot.material_override = _make_material(player_color.darkened(0.25), 0.4)
+	if _right_foot != null:
+		_right_foot.material_override = _make_material(player_color.darkened(0.25), 0.4)
+	if _tail_body != null and _tail_body.has_method("setup"):
+		_tail_body.call("setup", peer_id, player_color)
 	if ragdoll_rig != null and ragdoll_rig.has_method("apply_color"):
 		ragdoll_rig.call("apply_color", player_color)
 
@@ -486,10 +636,77 @@ func _refresh_visuals() -> void:
 		left_arm.visible = not hidden
 	if right_arm != null:
 		right_arm.visible = not hidden
+	if _left_foot != null:
+		_left_foot.visible = not hidden
+	if _right_foot != null:
+		_right_foot.visible = not hidden
+	if _tail_body != null:
+		_tail_body.visible = not hidden
 	if jetpack_visual != null:
 		jetpack_visual.visible = not hidden and has_jetpack
 	if _jetpack_flame != null:
 		_jetpack_flame.visible = false
+
+
+func _setup_shadow() -> void:
+	for arm in [left_arm, right_arm]:
+		if arm != null:
+			arm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var shadow_mesh := PlaneMesh.new()
+	shadow_mesh.size = Vector2(1.25, 0.82)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.0, 0.0, 0.0, 0.32)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_shadow = MeshInstance3D.new()
+	_shadow.name = "GroundShadow"
+	_shadow.mesh = shadow_mesh
+	_shadow.material_override = material
+	_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_shadow.rotation_degrees.x = -90.0
+	_shadow.top_level = true
+	_shadow.visible = false
+	# Adding the shadow to this climber (with top_level enabled) avoids touching
+	# the scene root while it is busy setting up children during _ready().
+	add_child(_shadow)
+
+
+func _update_shadow() -> void:
+	# The shadow lives on the scene root and is freed on _exit_tree. During a
+	# scene change _physics_process can still run after that, so never touch a
+	# node that is no longer in the tree (Godot logs a Transform3D error).
+	if not is_inside_tree() or not is_node_ready():
+		return
+	if _shadow == null or not is_instance_valid(_shadow) or not _shadow.is_inside_tree():
+		return
+	if ragdoll_active or dead:
+		_shadow.visible = false
+		return
+	var world := get_world_3d()
+	if world == null:
+		_shadow.visible = false
+		return
+	var from: Vector3 = global_position + (Vector3.UP * 0.1)
+	var query := PhysicsRayQueryParameters3D.create(from, from - (Vector3.UP * _shadow_ray_length), climbable_mask, [])
+	query.exclude = _ray_exclusions()
+	var hit := world.direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		_shadow.visible = false
+		return
+	var height: float = maxf(0.0, from.y - float(hit.position.y))
+	var fade: float = clampf(1.0 - height / _shadow_ray_length, 0.0, 1.0)
+	var scale: float = lerpf(1.9, 0.85, fade)
+	if not _shadow.is_inside_tree():
+		return
+	_shadow.visible = fade > 0.02
+	_shadow.global_position = (hit.position as Vector3) + (Vector3.UP * 0.035)
+	_shadow.scale = Vector3(scale, scale, scale)
+	var mat := _shadow.material_override as StandardMaterial3D
+	if mat != null:
+		var c := mat.albedo_color
+		c.a = 0.34 * fade
+		mat.albedo_color = c
 
 
 func _setup_jetpack_visual() -> void:
@@ -545,12 +762,26 @@ func _find_climber(peer: int) -> Node:
 	return null
 
 
+func _find_tail(peer: int) -> Node:
+	if peer <= 0:
+		return null
+	for node in get_tree().get_nodes_in_group("climb_tails"):
+		if int(node.get("owner_peer_id")) == peer:
+			return node
+	return null
+
+
 func get_carry_hold_point() -> Vector3:
 	var forward: Vector3 = -global_transform.basis.z.normalized()
 	forward.y = 0.0
 	if forward.length_squared() < 0.001:
 		forward = Vector3.FORWARD
-	return global_position + forward.normalized() * 0.95 + (Vector3.UP * 0.25)
+	var lift: float = 0.25
+	var reach: float = 0.95
+	if carry_kind == 0 and is_instance_valid(_carry_node) and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET:
+		lift = -0.18
+		reach = 1.28
+	return global_position + forward.normalized() * reach + (Vector3.UP * lift)
 
 
 func set_carry(kind_value: int, target_id_value: String) -> void:
@@ -563,6 +794,11 @@ func set_carry(kind_value: int, target_id_value: String) -> void:
 		_carry_node = _find_prop(target_id_value)
 	elif kind_value == 1:
 		_carry_node = _find_climber(int(target_id_value))
+	elif kind_value == 2:
+		_carry_node = _find_tail(int(target_id_value))
+	# The bucket needs both hands, so it frees any live anchors on pickup.
+	if _hands_full_with_bucket():
+		_release_all_arms()
 	stretch_overload_timer = 0.0
 	carry_changed.emit(carry_kind, carry_target_id)
 
@@ -581,11 +817,33 @@ func _clear_carry_local() -> void:
 func set_carried_by(peer: int) -> void:
 	if carried_by_peer == peer:
 		return
+	var was_carried := carried_by_peer > 0
 	carried_by_peer = maxi(0, peer)
 	_carrier_node = null
 	if carried_by_peer > 0:
 		_carrier_node = _find_climber(carried_by_peer)
+		_release_all_arms()
+		if unconscious:
+			# Keep them down until a bandage is spent on them. Fold the ragdoll
+			# rig away so the hold point drives one body instead of loose parts.
+			if ragdoll_active and ragdoll_rig != null:
+				ragdoll_rig.call("deactivate")
+			ragdoll_active = false
+			control_disabled = true
+			_reset_fall_state()
+			_apply_freeze()
+		elif ragdoll_active:
+			recover()
+	elif was_carried and unconscious:
+		# Dropped while still down: collapse again where the carrier left them.
+		ragdoll_active = true
+		control_disabled = true
+		ragdoll_timer = ragdoll_duration
+		if ragdoll_rig != null:
+			ragdoll_rig.call("activate_remote", global_transform)
+		freeze = true
 	stretch_overload_timer = 0.0
+	_refresh_visuals()
 	carry_changed.emit(carry_kind, carry_target_id)
 
 
@@ -600,8 +858,237 @@ func equip_jetpack(amount: float) -> void:
 	notice_requested.emit("JETPACK READY")
 
 
+func remove_jetpack() -> void:
+	if not has_jetpack:
+		return
+	has_jetpack = false
+	jetpack_fuel = 0.0
+	if _jetpack_flame != null:
+		_jetpack_flame.visible = false
+	jetpack_changed.emit(false, 0.0)
+	_refresh_visuals()
+	notice_requested.emit("JETPACK REMOVED")
+
+
+func add_bandage(amount: int = 1) -> void:
+	bandages = clampi(bandages + maxi(0, amount), 0, 9)
+	bandages_changed.emit(bandages)
+	notice_requested.emit("BANDAGE PICKED UP")
+
+
+func set_persistent_unconscious(value: bool) -> void:
+	persistent_unconscious = value
+
+
+## Prefers a carried downed teammate, then the closest unconscious one nearby.
+func find_bandage_target() -> Node:
+	if dead or ragdoll_active or carried_by_peer > 0 or bandages <= 0:
+		return null
+	if carry_kind == 1 and is_instance_valid(_carry_node) and bool(_carry_node.get("unconscious")):
+		return _carry_node
+	var best: Node = null
+	var best_distance := carry_reach + 1.0
+	for climber in get_tree().get_nodes_in_group("climbers"):
+		if int(climber.get("peer_id")) == peer_id or bool(climber.get("dead")):
+			continue
+		if not bool(climber.get("unconscious")):
+			continue
+		var carried := int(climber.get("carried_by_peer"))
+		if carried != 0 and carried != peer_id:
+			continue
+		var distance := global_position.distance_to(climber.global_position)
+		if distance < best_distance:
+			best = climber
+			best_distance = distance
+	return best
+
+
+func use_bandage_on_target(target_pid: int) -> void:
+	if dead or ragdoll_active or carried_by_peer > 0 or bandages <= 0:
+		return
+	var target := _find_climber(target_pid)
+	if target == null or int(target.get("peer_id")) == peer_id or bool(target.get("dead")):
+		return
+	if not bool(target.get("unconscious")):
+		return
+	bandages -= 1
+	bandages_changed.emit(bandages)
+	notice_requested.emit("BANDAGE APPLIED")
+	var manager := _game_manager()
+	if manager != null and manager.has_method("request_bandage_revive"):
+		manager.call("request_bandage_revive", target_pid)
+
+
+func revive_with_bandage(helper_pid: int) -> void:
+	if dead or not unconscious:
+		return
+	if carried_by_peer > 0:
+		set_carried_by(0)
+	if ragdoll_rig != null:
+		ragdoll_rig.call("deactivate")
+	var upright_position: Vector3 = global_position + (Vector3.UP * 0.2)
+	ragdoll_active = false
+	unconscious = false
+	control_disabled = false
+	ragdoll_timer = 0.0
+	_reset_unconscious_timer()
+	_reset_fall_state()
+	stretch = 0.0
+	stretch_overload_timer = 0.0
+	_release_arm(true)
+	_release_arm(false)
+	set_stamina_lock(stamina_lock - bandage_heal)
+	injury = maxf(0.0, injury - bandage_injury_relief)
+	current_stamina = minf(usable_max_stamina(), maxf(current_stamina, usable_max_stamina() * 0.55))
+	_apply_freeze()
+	global_transform = Transform3D(Basis.IDENTITY, upright_position)
+	replicated_position = upright_position
+	_remote_position_ready = false
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	invulnerability_timer = maxf(invulnerability_timer, invulnerability_time)
+	_refresh_visuals()
+	ragdoll_ended.emit()
+	unconscious_changed.emit(false)
+	revived.emit(helper_pid)
+	stamina_changed.emit(current_stamina, max_stamina)
+	injury_changed.emit(injury)
+	var notice := "SELF REVIVED" if helper_pid == peer_id else "REVIVED BY TEAMMATE"
+	notice_requested.emit(notice)
+
+
+func use_bandage() -> void:
+	if dead or bandages <= 0:
+		return
+	if ragdoll_active and not unconscious:
+		return
+	if carried_by_peer > 0:
+		return
+	bandages -= 1
+	bandages_changed.emit(bandages)
+	if unconscious:
+		revive_with_bandage(peer_id)
+		return
+	# A bandage is the only way to win back the red, locked part of the bar.
+	set_stamina_lock(stamina_lock - bandage_heal)
+	injury = maxf(0.0, injury - bandage_injury_relief)
+	current_stamina = minf(usable_max_stamina(), current_stamina + bandage_heal)
+	bandages_changed.emit(bandages)
+	injury_changed.emit(injury)
+	stamina_changed.emit(current_stamina, max_stamina)
+	notice_requested.emit("BANDAGE USED")
+
+
+func apply_fall_impact(impact_speed: float, fall_duration: float = 0.0) -> void:
+	var speed := maxf(0.0, impact_speed)
+	var duration := maxf(0.0, fall_duration)
+	# Long drops hurt twice: gravity made the impact faster, and the air time
+	# itself lowers the safe speed threshold. A short fall stays as forgiving as
+	# before because duration is zero when this API is called directly.
+	var effective_speed := speed + duration * fall_damage_per_second
+	var safe_speed := maxf(4.0, fall_damage_min_speed - duration * 1.5)
+	if effective_speed < safe_speed:
+		return
+	var loss := clampf((effective_speed - safe_speed) * fall_damage_per_speed, 0.0, fall_damage_max)
+	if loss <= 0.0:
+		return
+	current_stamina = maxf(0.0, current_stamina - loss)
+	# Hard landings do not heal back: the lost stamina becomes a permanent red
+	# slice of the bar until a bandage recovers it.
+	set_stamina_lock(stamina_lock + loss)
+	var injury_gain := loss / maxf(1.0, fall_damage_max) * (1.0 + minf(duration, 4.0) * 0.18)
+	injury = clampf(injury + injury_gain, 0.0, 1.0)
+	stun_timer = maxf(stun_timer, clampf(loss / 45.0 + duration * 0.06, 0.1, 0.9))
+	invulnerability_timer = maxf(invulnerability_timer, 0.35)
+	stamina_changed.emit(current_stamina, max_stamina)
+	injury_changed.emit(injury)
+	fall_damage.emit(loss, speed)
+	notice_requested.emit("FALL DAMAGE -%d STAMINA LOCKED" % int(loss))
+	if duration >= long_fall_notice_time:
+		notice_requested.emit("LONG FALL %.1fs -%d LOCKED" % [duration, int(loss)])
+	if current_stamina <= 0.0:
+		_collapse_from_fall()
+
+
+func _reset_unconscious_timer() -> void:
+	unconscious_time = 0.0
+	death_progress = 0.0
+	_death_notice_stage = 0
+
+
+func get_death_time_left() -> float:
+	if not unconscious or dead:
+		return 0.0
+	return maxf(0.0, unconscious_death_time - unconscious_time)
+
+
+func is_critically_damaged() -> bool:
+	return injury >= critical_injury or stamina_lock >= float(max_stamina) * critical_lock_ratio
+
+
+## A hard landing that empties the bar on an already badly hurt climber knocks
+## them out. They stay down until somebody spends a bandage, even after rescue.
+func _collapse_from_fall() -> void:
+	if dead or ragdoll_active or carried_by_peer > 0 or not is_critically_damaged():
+		return
+	persistent_unconscious = true
+	start_ragdoll()
+	notice_requested.emit("COLLAPSED - NEEDS A BANDAGE")
+
+
+func _die_from_unconscious() -> void:
+	if dead:
+		return
+	dead = true
+	control_disabled = true
+	_release_all_arms()
+	if ragdoll_active and ragdoll_rig != null:
+		ragdoll_rig.call("deactivate")
+	ragdoll_active = false
+	freeze = true
+	_reset_unconscious_timer()
+	_refresh_visuals()
+	died.emit("unconscious")
+
+
+func _reset_fall_state() -> void:
+	fall_time = 0.0
+	gravity_scale = 1.0
+	linear_damp = normal_linear_damp
+
+
+func _update_fall_dynamics(delta: float, grounded: bool) -> void:
+	var falling: bool = not grounded and not is_climbing() and linear_velocity.y < -0.5
+	if not falling:
+		if fall_time <= 0.0:
+			return
+		_reset_fall_state()
+		return
+	fall_time += delta
+	var ramp := clampf(fall_time / maxf(0.01, fall_accel_max_time), 0.0, 1.0)
+	gravity_scale = 1.0 + fall_accel_per_second * minf(fall_time, fall_accel_max_time) / 9.81
+	linear_damp = lerpf(normal_linear_damp, fall_damp_min, ramp)
+	if linear_velocity.y < -fall_speed_cap:
+		linear_velocity.y = -fall_speed_cap
+
+
+func get_total_weight() -> float:
+	var total := 0.0
+	if carry_kind == 0 and is_instance_valid(_carry_node):
+		total += maxf(1.0, float(_carry_node.get("mass_kg")))
+	elif carry_kind == 1 and is_instance_valid(_carry_node):
+		total += maxf(1.0, float(_carry_node.get("mass")))
+	if has_jetpack:
+		total += jetpack_mass_kg
+	return total
+
+
 func _request_carry() -> void:
-	if ragdoll_active or dead or control_disabled or carried_by_peer > 0:
+	if ragdoll_active or dead or control_disabled:
+		return
+	if carried_by_peer > 0:
+		# A passenger can release themselves by pressing F again.
+		_request_drop()
 		return
 	if carry_kind != -1:
 		_request_drop()
@@ -626,15 +1113,29 @@ func _request_carry() -> void:
 			var distance := from.distance_to(hit.position)
 			if distance >= best_distance:
 				continue
-			if collider.has_method("set_carrier") and not collider.has_method("get_state"):
+			if collider.is_in_group("climb_tails") or collider.has_method("get_tail_owner_id"):
+				kind = 2
+				target_id = str(int(collider.get("owner_peer_id")))
+				best_distance = distance
+			elif collider.has_method("set_carrier") and not collider.has_method("get_state"):
 				kind = 0
 				target_id = str(collider.get("prop_id"))
 				best_distance = distance
-			elif collider.has_method("get_state") and int(collider.get("peer_id")) != peer_id:
+			elif collider.has_method("get_state") and int(collider.get("peer_id")) != peer_id and not bool(collider.get("dead")):
 				kind = 1
 				target_id = str(int(collider.get("peer_id")))
 				best_distance = distance
 
+	if kind == -1:
+		for tail in get_tree().get_nodes_in_group("climb_tails"):
+			var owner_id := int(tail.get("owner_peer_id"))
+			if owner_id == peer_id or int(tail.get("carrier_id")) != 0:
+				continue
+			var tail_distance := global_position.distance_to(tail.global_position)
+			if tail_distance < carry_reach and tail_distance < best_distance:
+				kind = 2
+				target_id = str(owner_id)
+				best_distance = tail_distance
 	if kind == -1:
 		for prop in get_tree().get_nodes_in_group("climb_props"):
 			if int(prop.get("carrier_id")) > 0:
@@ -645,12 +1146,12 @@ func _request_carry() -> void:
 				target_id = str(prop.get("prop_id"))
 				best_distance = distance
 	for climber in get_tree().get_nodes_in_group("climbers"):
-		if int(climber.get("peer_id")) == peer_id or bool(climber.get("ragdoll_active")) or bool(climber.get("dead")):
+		if int(climber.get("peer_id")) == peer_id or bool(climber.get("dead")):
 			continue
 		if int(climber.get("carried_by_peer")) > 0:
 			continue
 		var distance := global_position.distance_to(climber.global_position)
-		if distance < 2.4 and distance < best_distance:
+		if distance < carry_reach and distance < best_distance:
 			kind = 1
 			target_id = str(int(climber.get("peer_id")))
 			best_distance = distance
@@ -661,6 +1162,39 @@ func _request_carry() -> void:
 	var manager := _game_manager()
 	if manager != null and manager.has_method("request_carry"):
 		manager.call("request_carry", kind, target_id)
+
+
+## Finds the nearest fixable nearby object. Props held by a teammate and props
+## that are already anchored get priority so coop building feels responsive.
+func find_fix_target() -> Node:
+	var best: Node = null
+	var best_score := INF
+	for prop in get_tree().get_nodes_in_group("climb_props"):
+		if int(prop.get("kind")) == ClimbProp.Kind.BUCKET:
+			continue
+		var distance := global_position.distance_to(prop.global_position)
+		if distance > fix_reach:
+			continue
+		var score := distance
+		var carrier := int(prop.get("carrier_id"))
+		if carrier > 0 and carrier != peer_id:
+			score *= 0.25
+		elif bool(prop.get("is_fixed")):
+			score *= 0.4
+		if score < best_score:
+			best = prop
+			best_score = score
+	return best
+
+
+func _request_fix_prop() -> void:
+	var prop := find_fix_target()
+	if prop == null:
+		notice_requested.emit("NOTHING TO FIX NEARBY")
+		return
+	var manager := _game_manager()
+	if manager != null and manager.has_method("request_fix_prop"):
+		manager.call("request_fix_prop", str(prop.get("prop_id")))
 
 
 func _request_drop() -> void:
@@ -700,6 +1234,16 @@ func _process_active_carry(delta: float) -> void:
 				manager.call("report_carried_prop", str(prop.get("prop_id")), prop.global_transform, prop.linear_velocity, prop.angular_velocity, water_value)
 	elif carry_kind == 1:
 		apply_central_force(Vector3.DOWN * _carry_mass() * 9.8 * carry_weight_factor)
+	elif carry_kind == 2:
+		var tail := _carry_node
+		var forward: Vector3 = -global_transform.basis.z.normalized()
+		forward.y = 0.0
+		if forward.length_squared() < 0.001:
+			forward = Vector3.FORWARD
+		var target := Transform3D(Basis.looking_at(forward.normalized(), Vector3.UP), get_carry_hold_point())
+		tail.global_transform = tail.global_transform.interpolate_with(target, clampf(delta * 12.0, 0.0, 1.0))
+		tail.linear_velocity = linear_velocity
+		apply_central_force(Vector3.DOWN * 1.5 * 9.8 * carry_weight_factor)
 
 
 func _process_carried(delta: float) -> void:
@@ -761,7 +1305,11 @@ func _physics_process(delta: float) -> void:
 		_sync_replicated_transform()
 	if not is_local or dead:
 		_apply_remote_transform(delta)
+		if carry_kind == 2:
+			_process_active_carry(delta)
 		_update_arm_visuals(delta)
+		_update_foot_visuals(delta)
+		_update_shadow()
 		return
 
 	invulnerability_timer = maxf(0.0, invulnerability_timer - delta)
@@ -770,13 +1318,23 @@ func _physics_process(delta: float) -> void:
 
 	_track_progress()
 
-	if Input.is_action_just_pressed("carry") and not ragdoll_active and carried_by_peer <= 0:
+	if Input.is_action_just_pressed("carry") and not ragdoll_active:
 		_request_carry()
+	if Input.is_action_just_pressed("fix_prop") and not ragdoll_active and carried_by_peer <= 0:
+		_request_fix_prop()
+	if Input.is_action_just_pressed("bandage"):
+		var revive_target := find_bandage_target()
+		if revive_target != null:
+			use_bandage_on_target(int(revive_target.get("peer_id")))
+		else:
+			use_bandage()
+	if Input.is_action_just_pressed("drop_jetpack"):
+		remove_jetpack()
 
-	if ragdoll_active:
-		_process_ragdoll(delta)
-	elif carried_by_peer > 0:
+	if carried_by_peer > 0:
 		_process_carried(delta)
+	elif ragdoll_active:
+		_process_ragdoll(delta)
 	elif control_disabled:
 		pass
 	else:
@@ -784,6 +1342,8 @@ func _physics_process(delta: float) -> void:
 
 	_update_stamina(delta)
 	_update_arm_visuals(delta)
+	_update_foot_visuals(delta)
+	_update_shadow()
 	_send_visual_state(delta)
 	_flush_prop_pulls(delta)
 	_check_fall()
@@ -795,14 +1355,42 @@ func _process_ragdoll(delta: float) -> void:
 		linear_velocity = ragdoll_rig.call("get_hips_velocity")
 	ragdoll_timer -= delta
 	if ragdoll_timer <= 0.0:
-		recover()
+		if persistent_unconscious and unconscious:
+			ragdoll_timer = 0.5
+		else:
+			recover()
+	if not unconscious or dead or carried_by_peer > 0:
+		return
+	# The longer a teammate stays down, the closer they get to death. Being
+	# carried pauses this clock, but only a bandage actually saves them.
+	unconscious_time += delta
+	death_progress = clampf(unconscious_time / maxf(0.1, unconscious_death_time), 0.0, 1.0)
+	if death_progress >= 1.0:
+		_die_from_unconscious()
+		return
+	var stage := 0
+	if death_progress >= 0.75:
+		stage = 3
+	elif death_progress >= 0.5:
+		stage = 2
+	elif death_progress >= 0.25:
+		stage = 1
+	if stage > _death_notice_stage:
+		_death_notice_stage = stage
+		notice_requested.emit("DYING - BANDAGE NOW (%ds)" % int(get_death_time_left()))
 
 
 func _process_climb(delta: float) -> void:
 	var grounded: bool = _is_grounded()
-	if grounded and not was_grounded and linear_velocity.y < -1.5:
+	var impact_speed: float = maxf(0.0, -linear_velocity.y)
+	if grounded and not was_grounded and impact_speed > 1.5:
 		landed.emit()
+		var fall_duration := fall_time
+		_reset_fall_state()
+		if impact_speed >= fall_damage_min_speed or fall_duration >= long_fall_notice_time:
+			apply_fall_impact(impact_speed, fall_duration)
 	was_grounded = grounded
+	_update_fall_dynamics(delta, grounded)
 
 	if is_mantling:
 		_process_mantle(delta)
@@ -903,6 +1491,9 @@ func _get_camera() -> Camera3D:
 
 func _ray_exclusions() -> Array[RID]:
 	var excluded: Array[RID] = [get_rid()]
+	# A climber must not grapple their own tail, but teammates still can.
+	if is_instance_valid(_tail_body):
+		excluded.append(_tail_body.get_rid())
 	if ragdoll_rig != null and ragdoll_rig.has_method("get_parts"):
 		var parts: Array = ragdoll_rig.call("get_parts")
 		for part in parts:
@@ -910,7 +1501,14 @@ func _ray_exclusions() -> Array[RID]:
 	return excluded
 
 
+func _hands_full_with_bucket() -> bool:
+	return carry_kind == 0 and is_instance_valid(_carry_node) and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET
+
+
 func _handle_arm_input() -> void:
+	if _hands_full_with_bucket():
+		_release_all_arms()
+		return
 	if Input.is_action_just_pressed("arm_left"):
 		_fire_arm(true)
 	elif Input.is_action_just_released("arm_left"):
@@ -923,6 +1521,9 @@ func _handle_arm_input() -> void:
 
 func _fire_arm(left: bool) -> void:
 	if ragdoll_active or carried_by_peer > 0 or stun_timer > 0.0:
+		return
+	if _hands_full_with_bucket():
+		_release_all_arms()
 		return
 	var arm: ArmAnchor = left_anchor if left else right_anchor
 	if not arm.anchored and current_stamina < 5.0:
@@ -1087,7 +1688,10 @@ func _update_stretch(delta: float) -> void:
 
 func _apply_movement(delta: float, grounded: bool) -> void:
 	var input: Vector2 = _move_input()
-	var speed_scale: float = 0.78 if carry_kind != -1 else 1.0
+	var weight: float = get_total_weight()
+	var speed_scale: float = 1.0 / (1.0 + weight * 0.0022)
+	if carry_kind != -1:
+		speed_scale = minf(speed_scale, 0.78)
 	var basis: Basis = global_transform.basis
 	if camera_pivot != null and camera_pivot.has_method("get_aim_forward"):
 		var aim: Vector3 = camera_pivot.call("get_aim_forward")
@@ -1106,7 +1710,9 @@ func _apply_movement(delta: float, grounded: bool) -> void:
 
 	var horizontal_velocity := Vector3(linear_velocity.x, 0.0, linear_velocity.z)
 	if grounded:
-		var can_walk: bool = count_anchors() < 2 and stun_timer <= 0.0
+		# Feet work independently of hands: a carrier or a climber with two
+		# anchors can still walk and jump on solid ground.
+		var can_walk: bool = stun_timer <= 0.0
 		if can_walk and input.length_squared() > 0.01:
 			var target: Vector3 = wish * walk_speed * speed_scale
 			apply_central_force((target - horizontal_velocity) * mass * walk_acceleration)
@@ -1140,9 +1746,11 @@ func _handle_jump(grounded: bool) -> void:
 		return
 	if _try_mantle():
 		return
-	if grounded and count_anchors() == 0:
+	if grounded:
+		var jump_scale: float = 1.0
+		var weight_scale: float = 1.0 / (1.0 + get_total_weight() * 0.004)
 		linear_velocity.y = maxf(linear_velocity.y, 0.0)
-		apply_central_impulse(Vector3.UP * ground_jump_velocity * mass)
+		apply_central_impulse(Vector3.UP * ground_jump_velocity * mass * jump_scale * weight_scale)
 
 
 func _try_mantle() -> bool:
@@ -1225,8 +1833,11 @@ func _update_stamina(delta: float) -> void:
 
 	if drain > 0.0:
 		current_stamina -= drain * delta
-	else:
-		var regen: float = stamina_regen * (1.6 if carried_by_peer > 0 else (1.2 if grounded else 1.0))
+	elif grounded:
+		# Stamina never recovers in mid-air. Only solid ground refills the bar;
+		# anchors and ropes keep draining it while hanging or climbing.
+		var regen: float = stamina_regen * (1.6 if carried_by_peer > 0 else 1.2)
+		regen *= 1.0 - clampf(injury, 0.0, 1.0) * injury_regen_penalty
 		current_stamina += regen * delta
 
 	if current_stamina <= 0.0:
@@ -1256,6 +1867,9 @@ func _track_progress() -> void:
 func _check_fall() -> void:
 	if dead or global_position.y >= FALL_LIMIT_Y:
 		return
+	var fall_duration := fall_time
+	_reset_fall_state()
+	apply_fall_impact(maxf(18.0, absf(linear_velocity.y)), fall_duration)
 	dead = true
 	control_disabled = true
 	_release_all_arms()
@@ -1292,6 +1906,19 @@ func _visual_frame() -> Dictionary:
 		"right": right,
 		"dangle": global_position + (forward * 0.34) + (Vector3.DOWN * 0.52),
 	}
+
+
+func _update_foot_visuals(delta: float) -> void:
+	if _left_foot == null or _right_foot == null:
+		return
+	if not is_local:
+		walk_cycle += delta * 10.0 * clampf(Vector3(linear_velocity.x, 0.0, linear_velocity.z).length() / 6.0, 0.0, 1.5)
+	var stride: float = sin(walk_cycle) * 0.18
+	var lift: float = maxf(0.0, cos(walk_cycle)) * 0.12
+	_left_foot.position = Vector3(-0.18, -0.78 + lift, stride)
+	_right_foot.position = Vector3(0.18, -0.78 - lift, -stride)
+	_left_foot.rotation_degrees.x = -stride * 55.0
+	_right_foot.rotation_degrees.x = stride * 55.0
 
 
 func _update_arm_visuals(delta: float) -> void:
@@ -1332,10 +1959,13 @@ func _update_arm_visuals(delta: float) -> void:
 
 	if carry_kind != -1 and is_instance_valid(_carry_node):
 		var carry_point: Vector3 = _carry_node.global_position
+		var two_handed: bool = carry_kind == 0 and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET
+		var hand_spread: float = 0.62 if two_handed else 0.16
+		var hand_lift: float = 0.52 if two_handed else 0.0
 		left_on = true
 		right_on = true
-		left_point = carry_point
-		right_point = carry_point
+		left_point = carry_point - (right * hand_spread) + (Vector3.UP * hand_lift)
+		right_point = carry_point + (right * hand_spread) + (Vector3.UP * hand_lift)
 		left_shooting = false
 		right_shooting = false
 		left_extend = 0.0

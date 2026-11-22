@@ -9,10 +9,12 @@ class_name PlayerCamera
 @export var max_pitch_deg: float = 85.0
 @export var follow_speed: float = 26.0
 @export var head_height: float = 0.95
+@export var fall_fov_boost: float = 14.0
 
 var pitch_deg: float = 0.0
 var yaw_rad: float = 0.0
 var enabled: bool = false
+var _base_fov: float = 75.0
 
 @onready var player: RigidBody3D = get_parent() as RigidBody3D
 @onready var camera: Camera3D = get_node_or_null("Camera3D") as Camera3D
@@ -21,6 +23,8 @@ var enabled: bool = false
 func _ready() -> void:
 	top_level = true
 	set_process(false)
+	if camera != null:
+		_base_fov = camera.fov
 
 
 func setup_local(local: bool) -> void:
@@ -79,6 +83,9 @@ func _process(delta: float) -> void:
 	if camera != null:
 		camera.position = Vector3.ZERO
 		camera.rotation_degrees.x = pitch_deg
+		var fall_time := maxf(0.0, float(player.get("fall_time")))
+		var target_fov := _base_fov + fall_fov_boost * clampf(fall_time / 2.6, 0.0, 1.0)
+		camera.fov = lerpf(camera.fov, target_fov, clampf(delta * 5.0, 0.0, 1.0))
 
 
 func _unhandled_input(event: InputEvent) -> void:

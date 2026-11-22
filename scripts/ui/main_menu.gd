@@ -1,7 +1,8 @@
 extends Control
 
 const DEFAULT_HINT := "Local play: 127.0.0.1  -  Ask your host for their address."
-const WEB_HINT := "Browser demo: ENet/UDP is unavailable here. Use SOLO. Full multiplayer needs the desktop build."
+const WEB_HINT := "Browser rooms use WebRTC and a WebSocket signaling server. ENet/UDP is unavailable here; host or join a room to play."
+const SIGNAL_CONFIG := "user://web_room.cfg"
 const DEFAULT_DISPLAY_NAME := "Climber"
 const MENU_WIDTH := 560.0
 const LOBBY_WIDTH := 920.0
@@ -12,14 +13,17 @@ var _lobby_panel: PanelContainer
 
 var _name_field: LineEdit
 var _address_field: LineEdit
+var _signal_field: LineEdit
+var _room_field: LineEdit
 var _port_field: SpinBox
 var _players_option: OptionButton
 var _error_label: Label
 var _hint_label: Label
 var _host_button: Button
 var _join_button: Button
-var _solo_button: Button
 var _is_web := false
+var _saved_signal_url := ""
+var _saved_room_code := ""
 
 var _player_list: VBoxContainer
 var _chat_log: RichTextLabel
@@ -34,6 +38,8 @@ var _host_tag: Label
 func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	_is_web = OS.has_feature("web")
+	randomize()
+	_load_web_settings()
 	_build_ui()
 	_connect_net_signals()
 	_show_menu()
@@ -138,7 +144,12 @@ func _build_menu_panel() -> PanelContainer:
 	_players_option.add_theme_font_size_override("font_size", 15)
 
 	if _is_web:
-		inner.add_child(_make_section("BROWSER MODE"))
+		inner.add_child(_make_section("BROWSER ROOM"))
+		_signal_field = _make_field("wss://signal.example.com", _saved_signal_url)
+		_room_field = _make_field("Room code", _saved_room_code)
+		inner.add_child(_make_row("Signal URL", _signal_field))
+		inner.add_child(_make_row("Room code", _room_field))
+		inner.add_child(_make_row("Max players", _players_option))
 	else:
 		inner.add_child(_make_section("CONNECTION"))
 		inner.add_child(_make_row("IP address", _address_field))
@@ -156,13 +167,11 @@ func _build_menu_panel() -> PanelContainer:
 
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 8)
-	_host_button = _make_button("HOST", "host")
-	_join_button = _make_button("JOIN", "join")
-	_solo_button = _make_button("SOLO", "primary")
+	_host_button = _make_button("HOST ROOM" if _is_web else "HOST", "host")
+	_join_button = _make_button("JOIN ROOM" if _is_web else "JOIN", "join")
 	var quit_button := _make_button("QUIT", "danger")
 	buttons.add_child(_host_button)
 	buttons.add_child(_join_button)
-	buttons.add_child(_solo_button)
 	buttons.add_child(quit_button)
 	for button in buttons.get_children():
 		(button as Button).size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -170,13 +179,10 @@ func _build_menu_panel() -> PanelContainer:
 
 	_host_button.pressed.connect(_on_host_pressed)
 	_join_button.pressed.connect(_on_join_pressed)
-	_solo_button.pressed.connect(_on_solo_pressed)
 	quit_button.pressed.connect(_on_quit_pressed)
 
 	if _is_web:
-		_host_button.hide()
-		_join_button.hide()
-		_solo_button.text = "PLAY SOLO"
+		quit_button.hide()
 
 	return panel
 
@@ -458,7 +464,10 @@ func _refresh_lobby() -> void:
 	_host_tag.text = "HOST" if Net.is_host else "CLIENT"
 
 	if Net.is_host:
-		_lobby_status.text = "Port %d  -  %d/%d players" % [Net.port, Net.players.size(), Net.max_players]
+		if _is_web:
+			_lobby_status.text = "Room %s  -  %d/%d players" % [Net.web_room, Net.players.size(), Net.max_players]
+		else:
+			_lobby_status.text = "Port %d  -  %d/%d players" % [Net.port, Net.players.size(), Net.max_players]
 	else:
 		_lobby_status.text = "Waiting for host to start…"
 
@@ -518,6 +527,23 @@ func _append_chat_entry(entry: Dictionary) -> void:
 	_chat_log.add_text(text + "\n")
 
 
+func _load_web_settings() -> void:
+	var config := ConfigFile.new()
+	if config.load(SIGNAL_CONFIG) != OK:
+		_saved_signal_url = ""
+		_saved_room_code = str(randi() % 9000 + 1000)
+		return
+	_saved_signal_url = str(config.get_value("room", "signal_url", ""))
+	_saved_room_code = str(config.get_value("room", "code", str(randi() % 9000 + 1000)))
+
+
+func _save_web_settings(signal_url: String, room: String) -> void:
+	var config := ConfigFile.new()
+	config.set_value("room", "signal_url", signal_url)
+	config.set_value("room", "code", room)
+	config.save(SIGNAL_CONFIG)
+
+
 # ---------------------------------------------------------------------------
 # Local button handlers
 # ---------------------------------------------------------------------------
@@ -528,6 +554,13 @@ func _on_host_pressed() -> void:
 	if display.is_empty():
 		display = DEFAULT_DISPLAY_NAME
 	_name_field.text = display
+	if _is_web:
+		var signal_url := _signal_field.text.strip_edges()
+		var room := _room_field.text.strip_edges().to_upper()
+		_save_web_settings(signal_url, room)
+		_hint_label.text = "Opening WebRTC room %s..." % room
+		Net.create_web_room(display, signal_url, room, _players_option.get_selected_id())
+		return
 	_hint_label.text = "Starting server on port %d..." % int(_port_field.value)
 	Net.create_server(display, _players_option.get_selected_id(), int(_port_field.value))
 
@@ -538,23 +571,19 @@ func _on_join_pressed() -> void:
 	if display.is_empty():
 		display = DEFAULT_DISPLAY_NAME
 	_name_field.text = display
+	if _is_web:
+		var signal_url := _signal_field.text.strip_edges()
+		var room := _room_field.text.strip_edges().to_upper()
+		_save_web_settings(signal_url, room)
+		_hint_label.text = "Joining WebRTC room %s..." % room
+		Net.join_web_room(display, signal_url, room)
+		return
 	var address := _address_field.text.strip_edges()
 	if address.is_empty():
 		address = "127.0.0.1"
 	_address_field.text = address
 	_hint_label.text = "Connecting to %s:%d..." % [address, int(_port_field.value)]
 	Net.join_server(display, address, int(_port_field.value))
-
-
-func _on_solo_pressed() -> void:
-	_error_label.text = ""
-	var display := _name_field.text.strip_edges()
-	if display.is_empty():
-		display = DEFAULT_DISPLAY_NAME
-	_name_field.text = display
-	_hint_label.text = "Starting solo match..."
-	Net.player_name = display
-	Net.start_solo()
 
 
 func _on_quit_pressed() -> void:

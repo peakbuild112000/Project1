@@ -20,6 +20,10 @@ const DECOMPERSSOR_URL_FMT: String = \
 const API_MENU_ITEM: String = "Wakatime API key"
 const CONFIG_MENU_ITEM: String = "Wakatime Config File"
 
+# Keep every heartbeat in one canonical project. Without this, WakaTime infers a
+# project from the folder name and splits the same work across several entries.
+const WAKATIME_PROJECT: String = "Climb Together"
+
 # Directories to grab wakatime from
 var wakatime_dir = null
 var wakatime_cli = null
@@ -236,7 +240,8 @@ func send_heartbeat(filepath: String, catagory: String, line_num: int, cursor_po
 	var cmd: Array[Variant] = ["--entity", filepath, "--key", api_key]
 	if is_write:
 		cmd.append("--write")
-	cmd.append_array(["--alternate-project", ProjectSettings.get("application/config/name")])
+	cmd.append_array(["--project", WAKATIME_PROJECT])
+	cmd.append_array(["--alternate-project", WAKATIME_PROJECT])
 	cmd.append_array(["--time", str(Time.get_unix_time_from_system())])
 	cmd.append_array(["--lineno", str(line_num)])
 	cmd.append_array(["--cursorpos", str(cursor_pos)])

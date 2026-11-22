@@ -1,0 +1,12 @@
+{
+  "name": "climb-together-signaling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal WebSocket signaling relay for Climb Together WebRTC rooms.",
+  "scripts": {
+    "start": "node signaling_server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

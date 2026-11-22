@@ -26,7 +26,7 @@ foreach ($script in $scripts) {
     $scriptPath = Join-Path $PSScriptRoot $script
     $output = & $Godot --headless --path $project --script $scriptPath 2>&1
     $code = $LASTEXITCODE
-    $output | Where-Object { $_ -match "failures=|SOLO game=|ERROR:|SCRIPT ERROR:" } | ForEach-Object { $_.ToString() }
+    $output | Where-Object { $_ -match "failures=|NO SOLO|ERROR:|SCRIPT ERROR:" } | ForEach-Object { $_.ToString() }
     Write-Output "$script EXIT $code"
     if ($code -ne 0) {
         $failed = $true

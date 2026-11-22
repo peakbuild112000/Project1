@@ -1,10 +1,12 @@
-"""Generate four low-poly item models for the Godot project and export them as GLB.
+"""Generate low-poly item and scenery models for the Godot project as GLB.
 
 Run with:
     bforartists.exe -b --python "C:\\Users\\PC\\Documents\\project-1\\assets\\blender\\generate_items.py"
 
 All geometry uses built-in Blender/bforartists primitives. Coordinates are authored
 Z-up (Blender) and exported Y-up (glTF/Godot), so "height" below is Blender Z.
+The script exports jetpack, trampoline, plank, crate, bandage, cabin, rock and
+enemy models into assets/models.
 """
 
 import math
@@ -77,6 +79,18 @@ def init_materials():
         "MAT_DarkRubber", (0.045, 0.055, 0.070, 1.0), 0.0, 0.90)
     MATS["elastic"] = make_material(
         "MAT_Elastic", (0.055, 0.360, 0.450, 1.0), 0.0, 0.70)
+    MATS["white"] = make_material(
+        "MAT_MedicalWhite", (0.930, 0.950, 0.970, 1.0), 0.0, 0.65)
+    MATS["red"] = make_material(
+        "MAT_MedicalRed", (0.900, 0.110, 0.130, 1.0), 0.0, 0.45,
+        emission=(0.75, 0.05, 0.06), emission_strength=0.35)
+    MATS["roof"] = make_material(
+        "MAT_RoofShingle", (0.260, 0.170, 0.150, 1.0), 0.0, 0.90)
+    MATS["glass"] = make_material(
+        "MAT_WindowGlass", (0.180, 0.520, 0.680, 1.0), 0.35, 0.18,
+        emission=(0.08, 0.35, 0.5), emission_strength=0.55)
+    MATS["stone"] = make_material(
+        "MAT_StoneRock", (0.235, 0.255, 0.305, 1.0), 0.0, 0.95)
 
 
 # --------------------------------------------------------------------------- #
@@ -350,6 +364,158 @@ def build_crate():
 
 
 # --------------------------------------------------------------------------- #
+# 5. Bandage  (small medical roll with a red cross, origin at center)
+# --------------------------------------------------------------------------- #
+
+def build_bandage():
+    roll = cylinder("BandageRoll", (0, 0, 0), 0.170, 0.300,
+                    MATS["white"], vertices=16)
+    apply_bevel(roll, 0.022, segments=2)
+    cylinder("BandageCore", (0, 0, 0), 0.075, 0.312,
+             MATS["edge"], vertices=12)
+    cylinder("BandageCapTop", (0, 0, 0.156), 0.174, 0.018,
+             MATS["white"], vertices=16)
+    cylinder("BandageCapBottom", (0, 0, -0.156), 0.174, 0.018,
+             MATS["white"], vertices=16)
+    # Red cross on the top face of the roll.
+    cube("BandageCrossVertical", (0, 0, 0.170),
+         (0.035, 0.150, 0.010), MATS["red"])
+    cube("BandageCrossHorizontal", (0, 0, 0.170),
+         (0.150, 0.035, 0.010), MATS["red"])
+    # Two loose tape ends wrapped around the cylinder.
+    cube("BandageTapeA", (0.155, 0.060, -0.060),
+         (0.030, 0.150, 0.070), MATS["white"], bevel=0.010)
+    cube("BandageTapeB", (-0.155, -0.060, 0.060),
+         (0.030, 0.150, 0.070), MATS["white"], bevel=0.010)
+
+
+# --------------------------------------------------------------------------- #
+# 6. Cabin  (12 x 9 footprint, floor at Blender Z = 0, 5 m tall walls)
+# --------------------------------------------------------------------------- #
+
+def build_cabin():
+    # Floor and low foundation.
+    cube("CabinFloor", (0, 0, 0.150), (5.9, 4.4, 0.150),
+         MATS["wood"])
+    cube("CabinFoundation", (0, 0, 0.030), (6.2, 4.7, 0.040),
+         MATS["dark"])
+
+    # Back wall (+Y in Blender becomes -Z in Godot, facing the mountain).
+    cube("CabinWallBack", (0, 4.35, 2.550), (5.9, 0.240, 2.450),
+         MATS["wood"])
+    cube("CabinWallLeft", (-5.85, 0, 2.550), (0.240, 4.35, 2.450),
+         MATS["wood"])
+    cube("CabinWallRight", (5.85, 0, 2.550), (0.240, 4.35, 2.450),
+         MATS["wood"])
+
+    # Front wall with a central door opening.
+    cube("CabinFrontLeft", (-3.9, -4.35, 2.550), (1.9, 0.240, 2.450),
+         MATS["wood"])
+    cube("CabinFrontRight", (3.9, -4.35, 2.550), (1.9, 0.240, 2.450),
+         MATS["wood"])
+    cube("CabinLintel", (0, -4.35, 4.600), (1.9, 0.240, 0.450),
+         MATS["wood"])
+    cube("CabinDoorFrameL", (-1.95, -4.48, 2.300), (0.100, 0.140, 2.250),
+         MATS["edge"])
+    cube("CabinDoorFrameR", (1.95, -4.48, 2.300), (0.100, 0.140, 2.250),
+         MATS["edge"])
+
+    # Gabled roof made from two sloped slabs.
+    left = cube("CabinRoofLeft", (-3.1, 0, 6.150),
+                (3.4, 4.85, 0.180), MATS["roof"])
+    left.rotation_euler.y = math.radians(16.0)
+    right = cube("CabinRoofRight", (3.1, 0, 6.150),
+                 (3.4, 4.85, 0.180), MATS["roof"])
+    right.rotation_euler.y = math.radians(-16.0)
+    cube("CabinRidge", (0, 0, 7.100), (0.220, 5.0, 0.220),
+         MATS["edge"])
+
+    # Glowing windows and a warm doorway light.
+    for side, x in (("L", -3.9), ("R", 3.9)):
+        cube("CabinWindow%s" % side, (x, -4.49, 2.900),
+             (1.1, 0.030, 1.0), MATS["glass"])
+        cube("CabinWindowSill%s" % side, (x, -4.55, 2.350),
+             (1.3, 0.080, 0.100), MATS["edge"])
+    cube("CabinPorchLamp", (0, -4.55, 4.250),
+         (0.200, 0.120, 0.200), MATS["cyan_bright"])
+
+    # Wooden support posts at the four corners.
+    for sx in (-5.85, 5.85):
+        for sy in (-4.35, 4.35):
+            cube("CabinPost_%s_%s" % (sx, sy), (sx, sy, 2.550),
+                 (0.320, 0.320, 5.100), MATS["dark"])
+
+
+# --------------------------------------------------------------------------- #
+# 7. Rock  (irregular low-poly boulder, origin near the center)
+# --------------------------------------------------------------------------- #
+
+def build_rock():
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.0,
+                                          location=(0, 0, 0))
+    main = finish(bpy.context.object, "RockCore", MATS["stone"])
+    main.scale = (1.15, 0.95, 0.82)
+    main.rotation_euler = (0.18, 0.42, -0.12)
+
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.62,
+                                          location=(0.72, -0.35, 0.18))
+    lobe = finish(bpy.context.object, "RockLobe", MATS["stone"])
+    lobe.scale = (1.0, 0.85, 0.75)
+    lobe.rotation_euler = (0.35, -0.2, 0.5)
+
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.48,
+                                          location=(-0.60, 0.40, -0.12))
+    chip = finish(bpy.context.object, "RockChip", MATS["dark"])
+    chip.scale = (1.1, 1.0, 0.7)
+    chip.rotation_euler = (-0.25, 0.7, 0.2)
+
+    # A thin snow cap on the top facet.
+    cap = cube("RockSnowCap", (0.0, 0.0, 0.760),
+               (0.90, 0.70, 0.090), MATS["white"])
+    cap.rotation_euler = (0.10, -0.08, 0.15)
+
+
+# --------------------------------------------------------------------------- #
+# 8. Enemy  (compact patrol drone with a glowing eye and four rotor arms)
+# --------------------------------------------------------------------------- #
+
+def build_enemy():
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.52,
+                                          location=(0, 0, 0))
+    core = finish(bpy.context.object, "EnemyCore", MATS["dark"])
+    core.scale = (1.0, 1.0, 0.72)
+
+    cylinder("EnemyEyeMount", (0, -0.470, 0.0), 0.210, 0.120,
+             MATS["edge"], vertices=12,
+             rotation=Vector((1.0, 0.0, 0.0)).rotation_difference(
+                 Vector((0.0, -1.0, 0.0))))
+    cylinder("EnemyEye", (0, -0.545, 0.0), 0.140, 0.060,
+             MATS["red"], vertices=12,
+             rotation=Vector((1.0, 0.0, 0.0)).rotation_difference(
+                 Vector((0.0, -1.0, 0.0))))
+    cylinder("EnemyTopFin", (0, 0, 0.520), 0.170, 0.180,
+             MATS["edge"], vertices=8, radius2=0.060)
+
+    for idx in range(4):
+        angle = math.radians(45.0 + 90.0 * idx)
+        dx, dy = math.cos(angle), math.sin(angle)
+        arm = cylinder("EnemyArm_%02d" % (idx + 1),
+                       (dx * 0.52, dy * 0.52, 0.0),
+                       0.050, 0.700, MATS["edge"], vertices=8,
+                       rotation=Vector((0.0, 0.0, 1.0)).rotation_difference(
+                           Vector((dx, dy, 0.0))))
+        cylinder("EnemyRotor_%02d" % (idx + 1),
+                 (dx * 0.92, dy * 0.92, 0.0),
+                 0.200, 0.045, MATS["cyan"], vertices=12)
+        cylinder("EnemyRotorHub_%02d" % (idx + 1),
+                 (dx * 0.92, dy * 0.92, 0.040),
+                 0.070, 0.070, MATS["dark"], vertices=8)
+
+    cube("EnemyWarningStrip", (0, 0.0, 0.400),
+         (0.420, 0.420, 0.045), MATS["orange"])
+
+
+# --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 
@@ -360,6 +526,10 @@ def main():
     build_and_export("trampoline.glb", build_trampoline)
     build_and_export("plank.glb", build_plank)
     build_and_export("crate.glb", build_crate)
+    build_and_export("bandage.glb", build_bandage)
+    build_and_export("cabin.glb", build_cabin)
+    build_and_export("rock.glb", build_rock)
+    build_and_export("enemy.glb", build_enemy)
     print("ALL_MODELS_DONE")
 
 

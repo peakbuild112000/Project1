@@ -1,21 +1,32 @@
 extends Node3D
 class_name LevelGenerator
 
-## Deterministic, seeded climbing tower. One fixed seed keeps the route fair;
-## a small per-match offset reshuffles ledges, gusts and brittle placements.
+## Deterministic, seeded procedural mountain. The same seed always produces the
+## same slope, ledges, gusts and brittle holds so every peer shares one route.
 
 const HAZARD_SCRIPT = preload("res://scripts/game/hazard.gd")
 const PROP_SCRIPT = preload("res://scripts/game/prop.gd")
 const ITEM_SCRIPT = preload("res://scripts/game/item_pickup.gd")
+const ENEMY_SCRIPT = preload("res://scripts/game/enemy.gd")
 const KIND_WIND := 0
 const KIND_CHECKPOINT := 1
 const KIND_SUMMIT := 2
 const KIND_BRITTLE := 3
+const KIND_ENEMY := 4
 const SUMMIT_Y := 142.0
+## Kept clear of the cabin: at 9.0 the mountain foot rose right in front of
+## the door and physically blocked the exit.
+const MOUNTAIN_CENTER_Z := 16.0
+const MOUNTAIN_BASE_RADIUS := 19.0
+const MOUNTAIN_GRID := 49
 const MODEL_CRATE := "res://assets/models/crate.glb"
 const MODEL_PLANK := "res://assets/models/plank.glb"
 const MODEL_TRAMPOLINE := "res://assets/models/trampoline.glb"
 const MODEL_JETPACK := "res://assets/models/jetpack.glb"
+const MODEL_BANDAGE := "res://assets/models/bandage.glb"
+const MODEL_CABIN := "res://assets/models/cabin.glb"
+const MODEL_ROCK := "res://assets/models/rock.glb"
+const MODEL_ENEMY := "res://assets/models/enemy.glb"
 
 signal hazard_hit(kind: int, label: String, body: Node)
 signal checkpoint_touched(height: float, body: Node)
@@ -28,7 +39,7 @@ var spawn_points: Array[Vector3] = []
 var checkpoint_positions: Dictionary = {}
 var props: Array[Node] = []
 var items: Array[Node] = []
-var summit_position := Vector3(0, SUMMIT_Y, 0)
+var summit_position := Vector3(0, SUMMIT_Y, MOUNTAIN_CENTER_Z)
 var spectator_position := Vector3(26, 62.0, 0)
 
 var _base_material: StandardMaterial3D
@@ -43,29 +54,41 @@ var _summit_material: StandardMaterial3D
 var _beacon_material: StandardMaterial3D
 var _rock_material: StandardMaterial3D
 var _snow_material: StandardMaterial3D
+var _mountain_material: StandardMaterial3D
 var _wood_material: StandardMaterial3D
 var _beacon: Node3D = null
 var _tutorial: Node3D = null
 var _tutorial_position := Vector3(0.0, 3.7, -15.1)
 var _mission_sign: Node3D = null
 var _house_position := Vector3(0.0, 1.9, -11.0)
+var _noise_phase_a := 0.0
+var _noise_phase_b := 0.0
+var _noise_phase_c := 0.0
+var _noise_phase_d := 0.0
 
 
 func generate(match_seed: int) -> void:
 	_clear()
 	seed_value = match_seed
 	rng.seed = match_seed
+	_noise_phase_a = rng.randf_range(0.0, TAU)
+	_noise_phase_b = rng.randf_range(0.0, TAU)
+	_noise_phase_c = rng.randf_range(0.0, TAU)
+	_noise_phase_d = rng.randf_range(0.0, TAU)
 	_build_materials()
 	_build_base()
 	_build_cabin()
-	_build_mountain_shell()
-	_build_tower()
+	_build_mountain_surface()
+	_build_mountain_routes()
+	_build_difficult_pillar()
+	_build_rocks()
 	_build_checkpoints()
 	_build_wind()
 	_build_brittle_holds()
 	_build_moving_platforms()
 	_build_summit()
 	_build_spectator_deck()
+	_build_enemies()
 	_build_props()
 	_build_items()
 
@@ -107,6 +130,8 @@ func _build_materials() -> void:
 	_beacon_material = _material(Color(0.5, 0.9, 1.0), Color(0.15, 0.75, 1.0), 2.2)
 	_rock_material = _material(Color(0.21, 0.23, 0.28))
 	_snow_material = _material(Color(0.72, 0.79, 0.86))
+	_mountain_material = _material(Color.WHITE)
+	_mountain_material.vertex_color_use_as_albedo = true
 	_wood_material = _material(Color(0.34, 0.23, 0.16))
 
 
@@ -152,68 +177,236 @@ func _add_hazard(pos: Vector3, size: Vector3, kind: int, hazard_label: String) -
 
 
 func _build_base() -> void:
-	_add_box(Vector3(0, -0.5, 0), Vector3(36, 3, 36), _base_material)
-	_add_box(Vector3(0, 0.9, 0), Vector3(21, 0.4, 21), _accent_material)
+	_add_box(Vector3(0, -0.5, MOUNTAIN_CENTER_Z), Vector3(52, 3, 52), _base_material)
+	_add_box(Vector3(0, 0.9, -6.0), Vector3(22, 0.4, 20), _accent_material)
 	var x_positions: Array[float] = [-3.4, -1.15, 1.15, 3.4]
 	for x in x_positions:
 		spawn_points.append(Vector3(x, 1.95, -12.8))
 
 
-func _build_mountain_shell() -> void:
-	var tiers := 14
+func _height_at(x: float, z: float) -> float:
+	var dx := x
+	var dz := z - MOUNTAIN_CENTER_Z
+	var distance := sqrt(dx * dx + dz * dz)
+	if distance >= MOUNTAIN_BASE_RADIUS:
+		return 1.0
+	var t := clampf(1.0 - distance / MOUNTAIN_BASE_RADIUS, 0.0, 1.0)
+	var profile := pow(t, 1.75) * SUMMIT_Y
+	var ridges := (
+		sin(x * 0.41 + _noise_phase_a) * cos(dz * 0.33 + _noise_phase_b) * 4.6
+		+ sin((x + dz) * 0.19 + _noise_phase_c) * 3.4
+		+ cos((x - dz) * 0.27 + _noise_phase_d) * 2.2
+	) * clampf(t * 1.7, 0.0, 1.0)
+	var height := 1.0 + profile + ridges
+	var cabin_d := Vector2(x, z + 11.0).length()
+	var cabin_carve := 1.0 - smoothstep(5.0, 8.0, cabin_d)
+	height = lerpf(height, 1.0, cabin_carve)
+	if distance < 2.6:
+		height = lerpf(height, SUMMIT_Y, clampf((2.6 - distance) / 2.6, 0.0, 1.0))
+	return maxf(1.0, height)
+
+
+func _mountain_point(height: float, angle: float, radial_offset: float = 0.0) -> Vector3:
+	var ratio := clampf(height / SUMMIT_Y, 0.0, 1.0)
+	var radius := MOUNTAIN_BASE_RADIUS * (1.0 - pow(ratio, 1.0 / 1.75)) + radial_offset
+	return Vector3(
+		cos(angle) * radius,
+		height,
+		MOUNTAIN_CENTER_Z + sin(angle) * radius
+	)
+
+
+func _build_mountain_surface() -> void:
+	var half := MOUNTAIN_GRID / 2
+	var cell := 1.0
+	var vertices: Array[Vector3] = []
+	var colors: Array[Color] = []
+	for iz in range(MOUNTAIN_GRID + 1):
+		var z := MOUNTAIN_CENTER_Z - float(half) + float(iz) * cell
+		for ix in range(MOUNTAIN_GRID + 1):
+			var x := -float(half) + float(ix) * cell
+			var h := _height_at(x, z)
+			vertices.append(Vector3(x, h, z))
+			var snow := clampf((h - 82.0) / 55.0, 0.0, 1.0)
+			var grit := clampf(sin(x * 0.73 + z * 0.41 + _noise_phase_d) * 0.08, -0.08, 0.08)
+			colors.append(Color(0.21 + grit, 0.23 + grit, 0.28 + grit).lerp(Color(0.72, 0.79, 0.86), snow))
+
+	var faces := PackedVector3Array()
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	surface.set_material(_mountain_material)
+	for iz in range(MOUNTAIN_GRID):
+		for ix in range(MOUNTAIN_GRID):
+			var a := iz * (MOUNTAIN_GRID + 1) + ix
+			var b := a + 1
+			var c := a + MOUNTAIN_GRID + 1
+			var d := c + 1
+			for tri in [[a, c, b], [b, c, d]]:
+				var ids: Array = tri
+				var i0 := int(ids[0])
+				var i1 := int(ids[1])
+				var i2 := int(ids[2])
+				var p0: Vector3 = vertices[i0]
+				var p1: Vector3 = vertices[i1]
+				var p2: Vector3 = vertices[i2]
+				faces.append(p0)
+				faces.append(p1)
+				faces.append(p2)
+				surface.set_color(colors[i0])
+				surface.add_vertex(p0)
+				surface.set_color(colors[i1])
+				surface.add_vertex(p1)
+				surface.set_color(colors[i2])
+				surface.add_vertex(p2)
+
+	var body := StaticBody3D.new()
+	body.name = "ProceduralMountain"
+	body.collision_layer = 1
+	body.collision_mask = 1
+	var collision := CollisionShape3D.new()
+	collision.name = "CollisionShape3D"
+	var concave := ConcavePolygonShape3D.new()
+	concave.set_faces(faces)
+	collision.shape = concave
+	body.add_child(collision)
+
+	surface.generate_normals()
+	var mesh := surface.commit()
+	var visual := MeshInstance3D.new()
+	visual.name = "MountainMesh"
+	visual.mesh = mesh
+	body.add_child(visual)
+	add_child(body)
+
+
+func _build_mountain_routes() -> void:
+	## Narrow, irregular holds pinned to the procedural slope. Higher bands are
+	## smaller, more spaced out and carry more fragile grips.
+	var tiers := 34
 	for i in range(tiers):
-		var t := float(i) / float(tiers - 1)
-		var y := 2.0 + t * 135.0
-		var size := lerpf(9.2, 2.6, t)
-		var offset := Vector3(sin(float(i) * 1.7) * 0.85, 0.0, cos(float(i) * 1.3) * 0.85)
-		var material: Material = _rock_material if i < 10 else _snow_material
-		_add_box(
-			offset + Vector3(0.0, y, 0.0),
-			Vector3(size, 11.0, size * 0.86),
-			material, null, Vector3(0.0, float(i) * 0.21, 0.0)
-		)
-		if i % 2 == 0:
-			var angle := float(i) * 0.9
-			var ridge := Vector3(cos(angle) * size * 0.62, y + 1.5, sin(angle) * size * 0.62)
+		var difficulty := float(i) / float(tiers - 1)
+		var y := 4.0 + difficulty * 132.0
+		var ledge_count := 3 if i % 5 == 0 else 2
+		var base_angle := float(i) * 0.71 + rng.randf_range(-0.18, 0.18)
+		for j in range(ledge_count):
+			var angle := base_angle + TAU * float(j) / float(ledge_count) + rng.randf_range(-0.22, 0.22)
+			var pos := _mountain_point(
+				y + rng.randf_range(-1.1, 1.4),
+				angle,
+				rng.randf_range(0.7, 1.9)
+			)
+			var width := rng.randf_range(lerpf(2.6, 1.2, difficulty), lerpf(3.5, 1.9, difficulty))
+			var depth := rng.randf_range(lerpf(1.9, 0.8, difficulty), lerpf(2.7, 1.3, difficulty))
+			var material: Material = _brittle_material if difficulty > 0.55 and rng.randf() < 0.25 else _hold_material
+			var rotation := Vector3(
+				rng.randf_range(-0.18, 0.18),
+				angle + rng.randf_range(-0.4, 0.4),
+				rng.randf_range(-0.18, 0.18)
+			)
+			_add_box(pos, Vector3(width, 0.45, depth), material, null, rotation)
+			if i % 3 == 0 and j == 0:
+				_add_box(
+					pos + Vector3(0.0, rng.randf_range(2.2, 3.1), 0.0),
+					Vector3(width * 0.85, 0.4, depth * 0.8),
+					_overhang_material, null,
+					Vector3(0.14, rotation.y + 0.35, -0.12)
+				)
+			if i % 4 == 2 and j == ledge_count - 1:
+				_add_box(
+					pos + Vector3(0.0, rng.randf_range(1.6, 2.4), 0.0),
+					Vector3(width * 0.7, 0.35, depth * 0.75),
+					_overhang_material, null,
+					Vector3(-0.16, rotation.y - 0.4, 0.14)
+				)
+		if i % 2 == 1:
+			var rib_angle := base_angle + 0.9
+			var rib := _mountain_point(y - 1.0, rib_angle, 0.2)
 			_add_box(
-				ridge,
-				Vector3(size * 0.5, 7.5, size * 0.45),
-				material, null, Vector3(0.08, angle, 0.12)
+				rib, Vector3(0.65, 6.2, 2.6), _wall_material, null,
+				Vector3(rng.randf_range(-0.12, 0.12), rib_angle, rng.randf_range(-0.16, 0.16))
 			)
 
 
-func _build_tower() -> void:
+func _build_difficult_pillar() -> void:
+	## A narrow alternate spire: tiny sloped holds, wide gaps and sharp overhangs.
+	var base := Vector3(22.5, 0.0, 14.0)
 	var segments := 28
 	for i in range(segments):
-		var y := 3.5 + float(i) * 5.0
-		var angle := float(i) * 0.42
-		var offset := Vector3(sin(angle) * 2.0, 0.0, cos(angle) * 2.0)
-		_add_box(offset + Vector3(0, y, 0), Vector3(6.4, 5.3, 5.2), _wall_material, null, Vector3(0, angle * 0.5, 0))
-		var ledge_count := 2 if i % 3 != 0 else 3
-		for j in range(ledge_count):
-			var hold_angle := angle + TAU * float(j) / float(ledge_count) + rng.randf_range(-0.28, 0.28)
-			var radius := rng.randf_range(5.0, 8.6)
-			var width := rng.randf_range(2.4, 4.4)
-			var depth := rng.randf_range(1.8, 3.2)
-			var hold_pos := Vector3(cos(hold_angle) * radius, y + rng.randf_range(-1.4, 1.7), sin(hold_angle) * radius)
-			var hold_rot := Vector3(rng.randf_range(-0.14, 0.14), hold_angle + rng.randf_range(-0.45, 0.45), rng.randf_range(-0.14, 0.14))
-			_add_box(hold_pos, Vector3(width, 0.55, depth), _hold_material, null, hold_rot)
-			if i % 3 == 0 and j == 0:
-				_add_box(hold_pos + Vector3(0, 2.9, 0), Vector3(width + 0.7, 0.5, depth + 0.5), _overhang_material, null, Vector3(0.1, hold_rot.y + 0.3, 0.08))
-		if i % 3 == 1:
-			var wall_angle := angle + 1.2
-			_add_box(Vector3(cos(wall_angle) * 4.8, y + 1.0, sin(wall_angle) * 4.8), Vector3(0.7, 7.5, 3.2), _wall_material, null, Vector3(0, wall_angle, 0))
+		var y := 4.0 + float(i) * 4.9
+		var lean := Vector3(sin(float(i) * 0.55) * 0.7, 0.0, cos(float(i) * 0.48) * 0.7)
+		var column := base + lean
+		_add_box(column + Vector3(0.0, y, 0.0), Vector3(2.5, 5.0, 2.5), _wall_material, null, Vector3(0.04, float(i) * 0.31, -0.04))
+		var hold_count := 2 if i % 5 != 0 else 1
+		for j in range(hold_count):
+			var angle := float(i) * 1.41 + TAU * float(j) / float(hold_count)
+			var radius := rng.randf_range(2.0, 3.3)
+			var hold_pos := column + Vector3(cos(angle) * radius, y + rng.randf_range(-0.8, 0.9), sin(angle) * radius)
+			var hold_rot := Vector3(rng.randf_range(-0.28, 0.28), angle, rng.randf_range(-0.28, 0.28))
+			_add_box(hold_pos, Vector3(rng.randf_range(0.9, 1.6), 0.3, rng.randf_range(0.8, 1.4)), _brittle_material, null, hold_rot)
+			if i % 3 == 1:
+				_add_box(hold_pos + Vector3(0.0, 2.5, 0.0), Vector3(1.3, 0.35, 1.2), _overhang_material, null, Vector3(0.22, hold_rot.y + 0.5, 0.18))
+		if i % 6 == 3:
+			_add_box(column + Vector3(0.0, y + 3.2, 0.0), Vector3(3.4, 0.35, 3.4), _hold_material, null, Vector3(0, float(i), 0))
+
+
+func _build_rocks() -> void:
+	for i in range(16):
+		var angle := rng.randf_range(0.0, TAU)
+		var radius := rng.randf_range(9.0, MOUNTAIN_BASE_RADIUS - 1.0)
+		var x := cos(angle) * radius
+		var z := MOUNTAIN_CENTER_Z + sin(angle) * radius
+		# Never drop a boulder in the cabin exit corridor.
+		if absf(x) < 4.5 and z > -12.0 and z < -2.5:
+			continue
+		var rock_point := Vector3(x, _height_at(x, z) + 0.4, z)
+		var holder := _instance_model(MODEL_ROCK)
+		holder.name = "Rock_%d" % i
+		holder.position = rock_point
+		holder.rotation_degrees = Vector3(rng.randf_range(-12.0, 12.0), rng.randf_range(0.0, 360.0), rng.randf_range(-12.0, 12.0))
+		var scale_value := rng.randf_range(0.9, 1.8)
+		holder.scale = Vector3.ONE * scale_value
+		add_child(holder)
+		var shape := CollisionShape3D.new()
+		var sphere := SphereShape3D.new()
+		sphere.radius = 1.2 * scale_value
+		shape.shape = sphere
+		var body := StaticBody3D.new()
+		body.collision_layer = 1
+		body.collision_mask = 1
+		body.position = rock_point
+		body.add_child(shape)
+		add_child(body)
+
+
+func _build_enemies() -> void:
+	var heights: Array[float] = [14.0, 42.0, 68.0, 95.0, 118.0, 136.0]
+	for i in range(heights.size()):
+		var enemy = ENEMY_SCRIPT.new()
+		enemy.name = "Enemy_%d" % i
+		var points: Array[Vector3] = []
+		for step in range(4):
+			var angle := TAU * float(step) / 4.0 + float(i) * 0.7
+			points.append(_mountain_point(
+				heights[i] + sin(angle * 2.0) * 1.4,
+				angle,
+				0.7 + float(i % 3) * 0.35
+			))
+		# setup() writes global_position, so the node must be in the tree first.
+		add_child(enemy)
+		enemy.call("setup", points, 2.4 + float(i) * 0.15, 13.0 + float(i) * 1.2)
+		if enemy.has_signal(&"enemy_hit"):
+			enemy.connect(&"enemy_hit", Callable(self, "_on_enemy_hit"))
 
 
 func _build_checkpoints() -> void:
-	var heights: Array[float] = [20.0, 50.0, 90.0]
+	var heights: Array[float] = [26.0, 64.0, 104.0]
 	for i in range(heights.size()):
 		var height: float = heights[i]
 		var angle := 0.7 + float(i) * 2.1
-		var pos := Vector3(cos(angle) * 7.8, height, sin(angle) * 7.8)
-		_add_box(pos, Vector3(5.4, 0.7, 5.4), _checkpoint_material)
+		var pos := _mountain_point(height, angle, 1.2)
+		_add_box(pos, Vector3(4.4, 0.7, 4.4), _checkpoint_material)
 		_add_box(pos + Vector3(0, 1.7, 0), Vector3(0.32, 3.2, 0.32), _beacon_material)
-		var area := _add_hazard(pos + Vector3(0, 2.0, 0), Vector3(6.4, 5.0, 6.4), KIND_CHECKPOINT, "CHECKPOINT %d m" % int(height))
+		var area := _add_hazard(pos + Vector3(0, 2.0, 0), Vector3(5.4, 5.0, 5.4), KIND_CHECKPOINT, "CHECKPOINT %d m" % int(height))
 		area.set("checkpoint_height", height)
 		area.connect(&"checkpoint_reached", Callable(self, "_on_hazard_checkpoint"))
 		area.connect(&"hazard_triggered", Callable(self, "_on_hazard_triggered"))
@@ -221,14 +414,14 @@ func _build_checkpoints() -> void:
 
 
 func _build_wind() -> void:
-	var heights: Array[float] = [30.0, 65.0, 100.0, 123.0]
+	var heights: Array[float] = [32.0, 68.0, 102.0, 126.0]
 	for i in range(heights.size()):
 		var height: float = heights[i]
-		var area := _add_hazard(Vector3(0, height, 0), Vector3(31, 10, 31), KIND_WIND, "WIND GUST")
+		var area := _add_hazard(Vector3(0, height, MOUNTAIN_CENTER_Z), Vector3(44, 10, 44), KIND_WIND, "WIND GUST")
 		var angle := rng.randf_range(0.0, TAU)
 		area.set("gust_axis", Vector3(cos(angle), 0.0, sin(angle)))
-		area.set("wind_force", 9.0 + float(i) * 4.0)
-		area.set("gust_period", rng.randf_range(3.4, 5.8))
+		area.set("wind_force", 12.0 + float(i) * 5.0)
+		area.set("gust_period", rng.randf_range(2.8, 4.8))
 		area.set("gust_phase", rng.randf_range(0.0, 1.0))
 		area.connect(&"hazard_triggered", Callable(self, "_on_hazard_triggered"))
 		_add_wind_visual(height)
@@ -243,51 +436,51 @@ func _add_wind_visual(height: float) -> void:
 	material.emission_energy_multiplier = 0.3
 	var mesh := MeshInstance3D.new()
 	var cube := BoxMesh.new()
-	cube.size = Vector3(31, 10, 31)
+	cube.size = Vector3(44, 10, 44)
 	mesh.mesh = cube
 	mesh.material_override = material
-	mesh.position = Vector3(0, height, 0)
+	mesh.position = Vector3(0, height, MOUNTAIN_CENTER_Z)
 	add_child(mesh)
 
 
 func _build_brittle_holds() -> void:
-	var heights: Array[float] = [36.0, 56.0, 76.0, 96.0, 116.0, 132.0]
+	var heights: Array[float] = [38.0, 58.0, 78.0, 98.0, 118.0, 132.0]
 	for i in range(heights.size()):
 		var height: float = heights[i]
 		var count := 3 if i < 3 else 2
-		for j in range(count):
+		for _j in range(count):
 			var angle := rng.randf_range(0.0, TAU)
-			var radius := rng.randf_range(5.2, 8.2)
-			var size := Vector3(rng.randf_range(2.4, 3.6), 0.5, rng.randf_range(2.0, 3.0))
+			var size := Vector3(rng.randf_range(1.8, 2.8), 0.4, rng.randf_range(1.4, 2.2))
 			var hold = HAZARD_SCRIPT.BrittleHold.new()
-			hold.call("setup", size, _brittle_material, 2.0)
-			hold.position = Vector3(cos(angle) * radius, height + rng.randf_range(-1.0, 1.0), sin(angle) * radius)
+			hold.call("setup", size, _brittle_material, 1.4)
+			hold.position = _mountain_point(height + rng.randf_range(-1.0, 1.0), angle, rng.randf_range(0.8, 1.6))
 			hold.rotation = Vector3(0.0, angle + rng.randf_range(-0.3, 0.3), rng.randf_range(-0.1, 0.1))
 			add_child(hold)
 			hold.connect(&"broke", Callable(self, "_on_brittle_broke"))
 
 
 func _build_moving_platforms() -> void:
-	var heights: Array[float] = [45.0, 80.0, 110.0, 130.0]
+	var heights: Array[float] = [46.0, 82.0, 112.0, 130.0]
 	for i in range(heights.size()):
 		var angle := rng.randf_range(0.0, TAU)
-		var origin := Vector3(cos(angle) * 7.2, heights[i], sin(angle) * 7.2)
-		var travel := Vector3(-sin(angle) * (8.0 + float(i) * 1.6), rng.randf_range(0.0, 1.2), cos(angle) * (8.0 + float(i) * 1.6))
+		var origin := _mountain_point(heights[i], angle, 1.6)
+		var travel_length := 9.0 + float(i) * 1.5
+		var travel := Vector3(-sin(angle) * travel_length, rng.randf_range(0.0, 1.2), cos(angle) * travel_length)
 		var platform = HAZARD_SCRIPT.MovingPlatform.new()
-		platform.call("setup", origin, travel, 4.5 + float(i) * 0.5, rng.randf_range(0.0, 1.0), Vector3(3.8, 0.6, 3.4), _moving_material)
+		platform.call("setup", origin, travel, 3.6 + float(i) * 0.5, rng.randf_range(0.0, 1.0), Vector3(3.0, 0.6, 2.8), _moving_material)
 		add_child(platform)
-		_add_box(Vector3(cos(angle) * 7.2, heights[i] - 5.0, sin(angle) * 7.2), Vector3(2.8, 0.5, 2.8), _hold_material, null, Vector3(0, angle, 0))
+		var anchor := _mountain_point(heights[i] - 4.0, angle, 0.4)
+		_add_box(anchor, Vector3(2.2, 0.5, 2.2), _hold_material, null, Vector3(0, angle, 0))
 
 
 func _build_summit() -> void:
-	_add_box(Vector3(0, 141.0, 0), Vector3(7.0, 1.0, 7.0), _summit_material)
-	_add_box(Vector3(0, 143.6, 0), Vector3(1.2, 5.0, 1.2), _beacon_material)
-	var area := _add_hazard(Vector3(0, 142.8, 0), Vector3(9, 5, 9), KIND_SUMMIT, "SUMMIT")
+	_add_box(Vector3(summit_position.x, 141.0, summit_position.z), Vector3(6.0, 1.0, 6.0), _summit_material)
+	_add_box(Vector3(summit_position.x, 143.6, summit_position.z), Vector3(1.2, 5.0, 1.2), _beacon_material)
+	var area := _add_hazard(Vector3(summit_position.x, 142.8, summit_position.z), Vector3(8, 5, 8), KIND_SUMMIT, "SUMMIT")
 	area.connect(&"summit_reached", Callable(self, "_on_hazard_summit"))
 	area.connect(&"hazard_triggered", Callable(self, "_on_hazard_triggered"))
-	summit_position = Vector3(0, SUMMIT_Y, 0)
 	_beacon = Node3D.new()
-	_beacon.position = Vector3(0, 145.0, 0)
+	_beacon.position = Vector3(summit_position.x, 145.0, summit_position.z)
 	add_child(_beacon)
 	for i in range(3):
 		var torus := TorusMesh.new()
@@ -315,14 +508,24 @@ func _build_spectator_deck() -> void:
 
 func _build_cabin() -> void:
 	var wall_y := 3.75
-	_add_box(Vector3(0.0, 1.16, -11.0), Vector3(12.0, 0.25, 9.0), _wood_material)
-	_add_box(Vector3(0.0, wall_y, -15.45), Vector3(12.0, 5.0, 0.5), _wood_material)
-	_add_box(Vector3(-5.85, wall_y, -11.0), Vector3(0.5, 5.0, 9.0), _wood_material)
-	_add_box(Vector3(5.85, wall_y, -11.0), Vector3(0.5, 5.0, 9.0), _wood_material)
-	_add_box(Vector3(-3.9, wall_y, -6.55), Vector3(4.0, 5.0, 0.5), _wood_material)
-	_add_box(Vector3(3.9, wall_y, -6.55), Vector3(4.0, 5.0, 0.5), _wood_material)
-	_add_box(Vector3(0.0, 5.85, -6.55), Vector3(3.8, 0.7, 0.5), _wood_material)
-	_add_box(Vector3(0.0, 6.65, -11.0), Vector3(12.7, 0.35, 9.7), _wood_material)
+	var shells: Array[Node] = []
+	shells.append(_add_box(Vector3(0.0, 1.16, -11.0), Vector3(12.0, 0.25, 9.0), _wood_material))
+	shells.append(_add_box(Vector3(0.0, wall_y, -15.45), Vector3(12.0, 5.0, 0.5), _wood_material))
+	shells.append(_add_box(Vector3(-5.85, wall_y, -11.0), Vector3(0.5, 5.0, 9.0), _wood_material))
+	shells.append(_add_box(Vector3(5.85, wall_y, -11.0), Vector3(0.5, 5.0, 9.0), _wood_material))
+	shells.append(_add_box(Vector3(-3.9, wall_y, -6.55), Vector3(4.0, 5.0, 0.5), _wood_material))
+	shells.append(_add_box(Vector3(3.9, wall_y, -6.55), Vector3(4.0, 5.0, 0.5), _wood_material))
+	shells.append(_add_box(Vector3(0.0, 5.85, -6.55), Vector3(3.8, 0.7, 0.5), _wood_material))
+	shells.append(_add_box(Vector3(0.0, 6.65, -11.0), Vector3(12.7, 0.35, 9.7), _wood_material))
+	if ResourceLoader.exists(MODEL_CABIN):
+		for shell in shells:
+			for child in shell.get_children():
+				if child is MeshInstance3D:
+					(child as MeshInstance3D).visible = false
+		var cabin: Node3D = _instance_model(MODEL_CABIN)
+		cabin.name = "CabinModel"
+		cabin.position = Vector3(0.0, 1.16, -11.0)
+		add_child(cabin)
 	_build_control_drawings()
 	_build_mission_sign()
 
@@ -458,6 +661,10 @@ func _on_brittle_broke() -> void:
 	hazard_hit.emit(KIND_BRITTLE, "HOLD SNAPPED", self)
 
 
+func _on_enemy_hit(body: Node) -> void:
+	hazard_hit.emit(KIND_ENEMY, "ENEMY HIT", body)
+
+
 func _instance_model(path: String) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "Model"
@@ -531,44 +738,44 @@ func _build_props() -> void:
 	bucket_shape.radius = 0.92
 	bucket_shape.height = PROP_SCRIPT.BUCKET_HEIGHT
 
-	var crate_heights: Array[float] = [10.0, 33.0, 58.0, 84.0, 108.0, 128.0]
+	var crate_heights: Array[float] = [12.0, 36.0, 60.0, 86.0, 110.0, 130.0]
 	for i in range(crate_heights.size()):
 		var angle := rng.randf_range(0.0, TAU)
-		var radius := rng.randf_range(5.8, 7.4)
-		var pos := Vector3(cos(angle) * radius, crate_heights[i] + 0.85, sin(angle) * radius)
+		var pos := _mountain_point(crate_heights[i], angle, rng.randf_range(0.8, 1.7))
+		pos.y += 0.85
 		_make_prop("crate_%d" % i, PROP_SCRIPT.Kind.CRATE, "CAISSE", 28.0, 0.0, MODEL_CRATE, crate_shape, Vector3.ZERO, pos, rng.randf_range(0.0, TAU))
 
-	var plank_heights: Array[float] = [18.0, 44.0, 72.0, 100.0, 122.0]
+	var plank_heights: Array[float] = [20.0, 48.0, 74.0, 102.0, 124.0]
 	for i in range(plank_heights.size()):
 		var angle := rng.randf_range(0.0, TAU)
-		var radius := rng.randf_range(6.2, 7.8)
-		var pos := Vector3(cos(angle) * radius, plank_heights[i] + 0.35, sin(angle) * radius)
+		var pos := _mountain_point(plank_heights[i], angle, rng.randf_range(0.9, 1.8))
+		pos.y += 0.35
 		_make_prop("plank_%d" % i, PROP_SCRIPT.Kind.PLANK, "PLANCHE", 16.0, 0.0, MODEL_PLANK, plank_shape, Vector3.ZERO, pos, rng.randf_range(0.0, TAU))
 
-	var trampoline_heights: Array[float] = [26.0, 66.0, 94.0, 130.0]
+	var trampoline_heights: Array[float] = [28.0, 68.0, 96.0, 132.0]
 	for i in range(trampoline_heights.size()):
 		var angle := rng.randf_range(0.0, TAU)
-		var radius := rng.randf_range(6.0, 7.4)
-		var pos := Vector3(cos(angle) * radius, trampoline_heights[i] + 0.55, sin(angle) * radius)
+		var pos := _mountain_point(trampoline_heights[i], angle, rng.randf_range(0.8, 1.6))
+		pos.y += 0.55
 		_make_prop("trampoline_%d" % i, PROP_SCRIPT.Kind.TRAMPOLINE, "TRAMPOLINE", 90.0, 15.5 + float(i) * 0.7, MODEL_TRAMPOLINE, trampoline_shape, Vector3.ZERO, pos, rng.randf_range(0.0, TAU))
 
 	_make_prop(
 		"bucket_0", PROP_SCRIPT.Kind.BUCKET, "SEAU D'EAU", 48.0, 0.0,
-		"", bucket_shape, Vector3.ZERO, Vector3(3.4, 143.2, 0.0), 0.0
+		"", bucket_shape, Vector3.ZERO, summit_position + Vector3(2.4, 1.2, 0.0), 0.0
 	)
 
 
 func _build_items() -> void:
-	var jetpack_heights: Array[float] = [13.0, 78.0]
+	var jetpack_heights: Array[float] = [16.0, 82.0]
 	for i in range(jetpack_heights.size()):
 		var angle := rng.randf_range(0.0, TAU)
-		var radius := rng.randf_range(6.0, 7.6)
 		var pickup = ITEM_SCRIPT.new()
 		pickup.name = "JetpackPickup_%d" % i
 		pickup.collision_layer = 4
 		pickup.collision_mask = 2
 		pickup.call("setup", "jetpack_%d" % i, 70.0)
-		pickup.position = Vector3(cos(angle) * radius, jetpack_heights[i] + 1.4, sin(angle) * radius)
+		pickup.position = _mountain_point(jetpack_heights[i], angle, rng.randf_range(0.9, 1.7))
+		pickup.position.y += 1.4
 		var shape := CollisionShape3D.new()
 		var sphere := SphereShape3D.new()
 		sphere.radius = 1.15
@@ -587,6 +794,35 @@ func _build_items() -> void:
 		if pickup.has_signal(&"touched"):
 			pickup.connect(&"touched", Callable(self, "_on_item_touched"))
 		_add_prop_pedestal(pickup.position + (Vector3.DOWN * 0.7), Vector3(2.0, 0.5, 2.0))
+
+	var bandage_heights: Array[float] = [24.0, 52.0, 78.0, 106.0, 128.0]
+	for i in range(bandage_heights.size()):
+		var angle := rng.randf_range(0.0, TAU)
+		var pickup = ITEM_SCRIPT.new()
+		pickup.name = "BandagePickup_%d" % i
+		pickup.collision_layer = 4
+		pickup.collision_mask = 2
+		pickup.call("setup", "bandage_%d" % i, 1.0, ITEM_SCRIPT.Kind.BANDAGE)
+		pickup.position = _mountain_point(bandage_heights[i], angle, rng.randf_range(0.8, 1.6))
+		pickup.position.y += 1.2
+		var shape := CollisionShape3D.new()
+		var sphere := SphereShape3D.new()
+		sphere.radius = 0.95
+		shape.shape = sphere
+		pickup.add_child(shape)
+		var holder := _instance_model(MODEL_BANDAGE)
+		holder.scale = Vector3.ONE * 1.15
+		pickup.add_child(holder)
+		var light := OmniLight3D.new()
+		light.light_color = Color(1.0, 0.45, 0.45)
+		light.light_energy = 2.5
+		light.omni_range = 6.0
+		pickup.add_child(light)
+		add_child(pickup)
+		items.append(pickup)
+		if pickup.has_signal(&"touched"):
+			pickup.connect(&"touched", Callable(self, "_on_item_touched"))
+		_add_prop_pedestal(pickup.position + (Vector3.DOWN * 0.6), Vector3(1.6, 0.4, 1.6))
 
 
 func _on_item_touched(item_id: String, body: Node) -> void:

@@ -221,12 +221,12 @@ available in the Web menu, so Godot tried to create a UDP server and failed.
 
 **Fix**
 
-`scripts/ui/main_menu.gd` checks `OS.has_feature("web")`. In the Web build it
-hides **HOST** and **JOIN**, shows a browser-mode notice, and renames **SOLO** to
-**PLAY SOLO**. `scripts/network/network_manager.gd` also rejects `create_server()`
-and `join_server()` on Web with a clear message, even if called directly. The
-Web build uses `OfflineMultiplayerPeer` only. Desktop builds keep the full
-host/join flow and port `7777`.
+`scripts/ui/main_menu.gd` checks `OS.has_feature("web")` and exposes only
+**HOST ROOM** / **JOIN ROOM** on WebRTC; the old offline solo entry point was
+removed. `scripts/network/network_manager.gd` still rejects direct
+`create_server()` and `join_server()` calls on Web, now pointing players to a
+WebRTC room. Desktop builds keep the ENet host/join flow and port `7777`. The
+WebRTC fix is documented below.
 
 ## 13. Static quality checks
 
@@ -252,3 +252,251 @@ Current result:
 STATIC BAD: 0
 EMPTY FILES: 0
 ```
+
+## 14. Long arm silhouettes looked like a giant shadow
+
+**Symptom**
+
+The first-person grapple arms cast long shadows that read as a strange creature
+on the ground.
+
+**Fix**
+
+`_setup_shadow()` creates a dedicated `GroundShadow` plane parented to the scene
+root with `top_level = true`. A downward ray finds the ground, and the plane is
+scaled/faded by height. Both arm meshes use
+`SHADOW_CASTING_SETTING_OFF`, so only the blob remains.
+
+## 15. Carrying an awake climber bypassed the rule
+
+**Symptom**
+
+`_check_carry_links()` dropped a climber link when the target recovered, but the
+host still accepted a fresh carry request for a non-ragdolling target.
+
+**Fix**
+
+`GameManager._authorize_carry()` now rejects `kind == 1` unless the target has
+`ragdoll_active == true`, and emits
+`ONLY UNCONSCIOUS CLIMBERS CAN BE CARRIED`. `GAME SMOKE` also asserts that an
+awake climber cannot be grabbed. **This restriction was later removed on
+purpose; see section 21 for the current rule that any teammate can be carried.**
+
+## 16. Fall damage needed to persist without extra state replication
+
+**Problem**
+
+Injury had to affect stamina regeneration on the owning peer without adding a
+new replicated property to every snapshot.
+
+**Fix**
+
+`injury`, `bandages` and fall damage are local simulation state on the climber.
+`apply_fall_impact()` runs on landing, `use_bandage()` is a local action, and the
+existing signals update the HUD. Only stamina, stretch and ragdoll remain in the
+replication config; no RPC was added for healing.
+
+## 17. New pickups and models broke the old validation counts
+
+**Symptom**
+
+`GAME SMOKE` expected exactly two `climb_items` nodes and `CLIMB VALIDATION`
+listed only four GLB files. Adding five bandage pickups and four new models made
+both checks fail.
+
+**Fix**
+
+- The smoke test now checks `items.size() >= 7`, at least five bandage pickups
+  and at least six `climb_enemies`.
+- The validation test checks all eight model paths, the `bandage` and
+  `drop_jetpack` actions, and the new climber methods/properties/signals.
+- `assets/blender/generate_items.py` exports `bandage.glb`, `cabin.glb`,
+  `rock.glb` and `enemy.glb` alongside the original four models.
+
+## 18. Online Web multiplayer needed a transport other than ENet
+
+**Problem**
+
+Browsers expose no UDP sockets, so `ENetMultiplayerPeer` cannot be used in a Web
+export. Hiding HOST/JOIN solved the crash but removed the requested online coop.
+
+**Fix**
+
+`scripts/network/web_rtc_room.gd` adds a second transport:
+`WebSocketPeer` carries only signaling JSON and `WebRTCMultiplayerPeer` carries
+game packets. The signaling relay (`tools/signaling_server.js`, Node.js + `ws`)
+assigns id `1` to the host and `2`–`4` to joiners, then forwards SDP and ICE
+messages. Only the host creates offers; clients answer. ICE candidates are
+buffered until the remote description exists, which avoids the race where a
+candidate arrives before the offer or answer is applied.
+
+`Net.create_web_room()` / `Net.join_web_room()` start this transport, while the
+old ENet methods keep their original Web rejections. The Web menu exposes the
+signaling URL and room code and saves them in `user://web_room.cfg`. An HTTPS
+page rejects `ws://` URLs because browsers block mixed content.
+
+The relay is external infrastructure: GitHub Pages serves only static files, so
+the published demo still needs a hosted signaling URL for online rooms.
+
+## 19. Props could not become stable coop platforms
+
+**Symptom**
+
+A carried plank followed the carrier's hands and stayed dynamic. Teammates had
+no way to hold it in place, so cooperative bridging was impossible.
+
+**Fix**
+
+`E` (`fix_prop`) asks the host to toggle `ClimbProp.is_fixed`. `set_fixed()`
+switches the body to `FREEZE_MODE_STATIC`, clears its carrier and applies a cyan
+emissive overlay. The host rejects the water bucket, the carrier of the held
+prop and fixers outside `FIX_REACH`; `rpc_apply_prop_fixed()` and the sixth field
+of `pack_state()` keep remote peers in sync. `find_fix_target()` prioritises
+props held by another player, and the HUD shows the contextual `E` prompt.
+`GAME SMOKE` now checks that a carrier cannot anchor their own object, that a
+fixed prop freezes and resists grabbing, and that `E` releases it.
+
+## 20. The tower was too forgiving and lives hid stamina pressure
+
+**Problem**
+
+The old level was a stack of wide ledges around a square core, and a death only
+cost one of three lives. That made falls cheap and removed the need to manage
+stamina or spend bandages. Separate clients also generated different obstacle
+layouts because each used `Time.get_ticks_msec()` as the seed.
+
+**Fix**
+
+`level_generator.gd` now generates a real seeded mountain: a grid heightfield
+with radial profile, ridged noise and a concave collision shape, plus narrow
+irregular holds, overhangs, hazards and pickups placed relative to the slope.
+The host now chooses one seed per match and sends it with the start RPC, so host
+and clients build the same route. GameManager no longer stores lives or spectators; a fall respawns at the
+checkpoint and adds five seconds. Hard landings, enemy strikes and wind gusts
+drain stamina and add injury, which slows regeneration. The HUD removes the
+effort bar and carry slot; injury only tints the single stamina bar. Tests now
+assert that no `lives`/`spectator` state exists and that the procedural mountain
+and its collider are present.
+
+## 21. Cross-scene shadow error and unreachable teammate carries
+
+**Problem**
+
+Changing scenes queued the root-level `GroundShadow` for deletion while other
+climbers still ran `_physics_process()`. Assigning `_shadow.global_position` on a
+node outside the tree flooded the console with
+`Condition "!is_inside_tree()" is true. Returning: Transform3D()`.
+Teammate carries were also restricted to ragdolling targets, and the carried
+climber's ragdoll branch ran before `_process_carried()`, so the passenger never
+followed the holder. Fall damage only reduced current stamina and healed back
+through regeneration, so it never created lasting pressure. Players also begun
+with a bandage, making the first fall free.
+
+**Fix**
+
+`_update_shadow()` now returns early unless both the climber and the shadow are
+inside the tree. Carry detection and `_authorize_carry()` accept awake climbers;
+`set_carried_by()` recovers an active ragdoll, releases arms and lets
+`_process_carried()` spring the passenger to the hold point. The watchdog checks
+the `carried_by_peer` link instead of ragdoll state. `apply_fall_impact()` adds
+the lost amount to `stamina_lock`; `usable_max_stamina()` excludes it from
+clamping and regeneration, respawn keeps it, and only `use_bandage()` restores
+it. The HUD draws that slice as a red overlay on the right of the stamina bar.
+`starting_bandages` is `0` and `harpoon_reach` is `14.0`. Validation and smoke
+tests check the new property, signal, methods, locked-stamina behaviour,
+teammate carry and short arm reach.
+
+## 22. Procedural mountain crash and prop drift after the gameplay changes
+
+**Problem**
+
+`LevelGenerator._build_mountain_surface()` called `SurfaceTool.add_color()`,
+which does not exist in Godot 4 (`set_color()` must be called before each
+`add_vertex()`), so startup aborted with `Nonexistent function 'add_color'`.
+`_build_enemies()` also called `enemy.setup()` before adding it to the tree,
+which made `setup()` write `global_position` on a node outside the tree. The
+root-level ground shadow was added during `_ready()`, which Godot rejected
+because the parent was busy setting up children. Finally, a fixed crate kept
+interpolating towards a stale carried transform and drifted out of reach, so
+the coop anchor test failed.
+
+**Fix**
+
+Vertex colours now use `SurfaceTool.set_color()`. Enemies are added to the tree
+before `setup()`. The `GroundShadow` is parented to the climber with
+`top_level` enabled, so no root child is added during `_ready()`. Fixed props
+skip remote transform interpolation in `_physics_process()`, keeping an anchor
+static. The smoke test uses physics frames and explicitly drops the crate next
+to the fixer so it validates coop anchoring independently of physics timing.
+All four previously missing GLB models are generated and imported again.
+
+## 23. Cabin-exit banner, flat fall damage and no teammate revive
+
+**Problem**
+
+The HUD created a `BRING WATER TO YOUR HOUSE` banner and toggled it when the
+local climber left the cabin; the user found that repeated text ugly. Fall
+damage depended only on impact speed, so stepping off a ledge and falling for
+many seconds felt the same as a short drop. An unconscious teammate could be
+carried, but there was no way to spend a bandage on them after dropping them:
+`use_bandage()` was self-only and refused to run during ragdoll.
+
+**Fix**
+
+The mission banner node and its visibility logic were removed from `hud.gd`;
+the active phase label now says `CLIMB` instead of repeating the mission phrase,
+and the in-world cabin sign remains. `climber.gd` now tracks `fall_time` only while
+the climber is airborne, descending and unanchored. `_update_fall_dynamics()`
+raises `gravity_scale`, lowers `linear_damp`, caps fall speed and lets
+`PlayerCamera` widen FOV. `apply_fall_impact()` accepts a duration, adds it to
+the effective impact speed, lowers the safe threshold and scales injury/stun,
+so long falls are faster and more punishing. A `LONG FALL ...` event is pushed
+to the HUD feed.
+
+`unconscious` is now distinct from `ragdoll_active`. In multiplayer
+`persistent_unconscious` stops the ragdoll timer from reviving a downed climber
+for free. Carrying a downed teammate folds the ragdoll away but keeps them
+unconscious; dropping them reopens the ragdoll. `find_bandage_target()`,
+`use_bandage_on_target()` and `revive_with_bandage()` implement the carry →
+drop → bandage flow. `GameManager` adds `request_bandage_revive` /
+`rpc_request_bandage_revive` / `rpc_apply_bandage_revive` with distance and
+ownership checks. A downed player can also spend their own bandage with `B`.
+The ragdoll banner now says `UNCONSCIOUS - NEEDS A BANDAGE`. Validation checks
+the new API, duration-scaled damage and fall acceleration; the smoke test
+carries, drops and revives a teammate. All Godot headless suites pass with
+`failures=0`.
+
+## 24. Solo mode, blocked cabin door, hands-full movement and death countdown
+
+**Problem**
+
+The menu exposed a **PLAY SOLO** button and `Net.start_solo()` opened an
+offline match, which the user no longer wanted. The mountain center sat at
+`z = 9.0`, so the procedural foot rose several metres immediately in front of
+the cabin door and a random boulder could land in the same corridor. Grounded
+movement was disabled whenever two hands were anchored, so a carrier or a
+climber holding the bucket with both hands could not walk or jump. Enemy hits
+only drained the refillable part of the bar. An unconscious teammate had no
+death pressure, and a badly injured climber could survive another fall at zero
+stamina.
+
+**Fix**
+
+The solo button, its handler, the `start_solo()` transport and the old solo test
+were removed; `solo_test.gd` now asserts that no solo entry point exists. The
+mountain center moved to `z = 16.0` and `_build_rocks()` skips
+`abs(x) < 4.5 && -12 < z < -2.5`, leaving flat ground at the door (verified in
+the smoke test). `_update_stamina()` regenerates only in the grounded branch,
+`apply_enemy_strike()` locks the lost stamina red until a bandage, and
+`_update_arm_visuals()` animates new `LeftFoot` / `RightFoot` meshes. Walking
+and jumping no longer check `count_anchors()`, and the bucket releases anchors
+and blocks new ones. Each climber owns a `TailRope` that teammates can grapple
+or carry with kind `2` and fling before it returns home.
+
+`is_critically_damaged()`, `_collapse_from_fall()`, `unconscious_time`,
+`death_progress` and `get_death_time_left()` implement the downed death clock.
+The timer advances only while ragdolled and uncarried, warns at 25/50/75%, and
+ends in `died("unconscious")`; being carried pauses it but still requires a
+bandage. The HUD banner shows the remaining seconds. Validation and smoke
+tests cover the removed solo API, feet/tail nodes, door clearance, critical
+collapse, timer death and carry pause.

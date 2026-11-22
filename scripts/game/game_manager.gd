@@ -1,8 +1,9 @@
 extends Node3D
 class_name GameManager
 
-## Authoritative match controller: countdown, timer, lives, scores, respawns,
-## winner, chat relay and compact 10 Hz state broadcast.
+## Authoritative match controller: countdown, timer, scores, respawns,
+## winner, chat relay and compact 10 Hz state broadcast. There are no lives;
+## falls hurt through stamina loss and a short respawn time penalty.
 
 const HAZARD_SCRIPT = preload("res://scripts/game/hazard.gd")
 const CLIMBER_SCENE := "res://scenes/climber.tscn"
@@ -12,8 +13,9 @@ const STATE_INTERVAL := 0.1
 const PHASE_COUNTDOWN := 0
 const PHASE_ACTIVE := 1
 const PHASE_ENDED := 2
-const MAX_LIVES := 3
-const FALL_PENALTY := 5.0
+const RESPAWN_PENALTY := 5.0
+const FIX_REACH := 4.5
+const REVIVE_REACH := 4.6
 
 @onready var world_environment: WorldEnvironment = $WorldEnvironment
 @onready var sun: DirectionalLight3D = $DirectionalLight3D
@@ -53,7 +55,16 @@ func _ready() -> void:
 	_setup_environment()
 	_setup_light()
 	if level.has_method("generate"):
-		level.call("generate", 20261121 + (Time.get_ticks_msec() % 997))
+		# The host picks one seed and sends it with the match-start RPC. Solo
+		# matches get a fresh seed locally. Every peer therefore builds the same
+		# procedural mountain instead of diverging per machine.
+		var seed_value := int(Net.get("match_seed"))
+		if seed_value <= 0:
+			var seed_source := str(Net.get("web_room"))
+			if seed_source.is_empty():
+				seed_source = "climb-together-local"
+			seed_value = 20261121 + abs(hash(seed_source)) % 100000
+		level.call("generate", seed_value)
 	if spawner.get_spawnable_scene_count() == 0:
 		spawner.add_spawnable_scene(CLIMBER_SCENE)
 	spawner.spawn_function = Callable(self, "_spawn_climber")
@@ -147,11 +158,9 @@ func _new_player_state(pid: int, display_name: String, color: Color) -> Dictiona
 		"peer_id": pid,
 		"name": display_name,
 		"color": color,
-		"lives": MAX_LIVES,
 		"highest_y": 0.0,
 		"checkpoint_y": 0.0,
 		"penalty": 0.0,
-		"spectator": false,
 		"score": 0
 	}
 
@@ -212,6 +221,8 @@ func _spawn_climber(data: Variant) -> Node:
 		return null
 	var climber := packed.instantiate()
 	climber.call("configure", pid, str(info.get("name", "Climber %d" % pid)), color)
+	if climber.has_method("set_persistent_unconscious"):
+		climber.call("set_persistent_unconscious", _has_network())
 	climber.set("peer_id", pid)
 	climber.set("summit_y", 142.0)
 	climber.set_multiplayer_authority(pid)
@@ -323,34 +334,20 @@ func _handle_death(reason: String, pid: int) -> void:
 	if not _is_authority() or _phase != PHASE_ACTIVE:
 		return
 	var entry: Dictionary = _players_state.get(pid, {})
-	if entry.is_empty() or bool(entry.get("spectator", false)):
+	if entry.is_empty():
 		return
-	var remaining := maxi(0, int(entry.get("lives", MAX_LIVES)) - 1)
-	entry["lives"] = remaining
-	entry["penalty"] = float(entry.get("penalty", 0.0)) + FALL_PENALTY
+	entry["penalty"] = float(entry.get("penalty", 0.0)) + RESPAWN_PENALTY
 	_authorize_drop(pid)
-	var climber: Node = _climbers.get(pid)
-	if climber != null:
-		climber.set("lives", remaining)
-	_notify("%s lost a life (%s)  +%.0f s" % [str(entry.get("name", "Climber")), reason, FALL_PENALTY])
+	_notify("%s is out (%s)  +%.0f s" % [str(entry.get("name", "Climber")), reason, RESPAWN_PENALTY])
 	_play_fx("fall", -4.0)
-	if remaining > 0:
-		var timer := get_tree().create_timer(1.2)
-		timer.timeout.connect(_respawn_after_delay.bind(pid))
-	else:
-		entry["spectator"] = true
-		var spectator_position: Vector3 = level.call("get_spectator_position")
-		if climber != null and climber.has_method("respawn_at"):
-			climber.call("respawn_at", spectator_position, false)
-		_notify("%s is out of lives - spectating" % str(entry.get("name", "Climber")))
+	var timer := get_tree().create_timer(1.2)
+	timer.timeout.connect(_respawn_after_delay.bind(pid))
 
 
 func _respawn_after_delay(pid: int) -> void:
 	if not _players_state.has(pid):
 		return
 	var entry: Dictionary = _players_state[pid]
-	if bool(entry.get("spectator", false)):
-		return
 	var climber: Node = _climbers.get(pid)
 	if climber == null or not climber.has_method("respawn_at"):
 		return
@@ -410,7 +407,7 @@ func _on_summit_for_peer(pid: int) -> void:
 	if not _is_authority() or _phase != PHASE_ACTIVE:
 		return
 	var entry: Dictionary = _players_state.get(pid, {})
-	if entry.is_empty() or bool(entry.get("spectator", false)):
+	if entry.is_empty():
 		return
 	entry["highest_y"] = maxf(float(entry.get("highest_y", 0.0)), 142.0)
 	_notify("SUMMIT! FIND THE WATER BUCKET")
@@ -420,6 +417,13 @@ func _find_climber_by_id(pid: int) -> Node:
 	var node: Variant = _climbers.get(pid)
 	if node is Node and is_instance_valid(node):
 		return node
+	return null
+
+
+func _find_tail_by_owner(pid: int) -> Node:
+	for tail in get_tree().get_nodes_in_group("climb_tails"):
+		if int(tail.get("owner_peer_id")) == pid:
+			return tail
 	return null
 
 
@@ -457,22 +461,91 @@ func _authorize_carry(carrier_pid: int, kind: int, target_id: String) -> void:
 		if prop == null or int(prop.get("carrier_id")) != 0:
 			_notify("OBJECT UNAVAILABLE")
 			return
+		if bool(prop.get("is_fixed")):
+			_notify("OBJECT IS FIXED - RELEASE IT FIRST")
+			return
 	elif kind == 1:
 		var target_pid := int(target_id)
 		var target: Node = _find_climber_by_id(target_pid)
-		if target == null or target_pid == carrier_pid or bool(target.get("dead")) or bool(target.get("ragdoll_active")):
+		if target == null or target_pid == carrier_pid or bool(target.get("dead")):
 			_notify("CLIMBER UNAVAILABLE")
 			return
+		# Awake and unconscious climbers can both be carried. A teammate must
+		# press F to grab and F again (or the passenger) to drop.
 		if int(target.get("carried_by_peer")) > 0:
 			_notify("CLIMBER ALREADY CARRIED")
 			return
 		if _carry_links.has(target_pid):
 			_clear_carry_link(target_pid, true)
+	elif kind == 2:
+		var owner_pid := int(target_id)
+		var owner: Node = _find_climber_by_id(owner_pid)
+		var tail: Node = _find_tail_by_owner(owner_pid)
+		if owner == null or tail == null or owner_pid == carrier_pid:
+			_notify("TAIL UNAVAILABLE")
+			return
+		if int(tail.get("carrier_id")) != 0:
+			_notify("TAIL ALREADY CARRIED")
+			return
 	else:
 		return
 
 	_apply_carry_link(carrier_pid, kind, target_id)
 	_broadcast_carry_link(carrier_pid, kind, target_id)
+
+
+## Coop build step: one climber carries a plank or crate while a teammate
+## anchors it as a temporary platform. The reverse action releases it.
+func request_fix_prop(prop_id: String) -> void:
+	if _is_authority():
+		_authorize_fix(_local_id, prop_id)
+		return
+	rpc_id(1, "rpc_request_fix", prop_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_request_fix(prop_id: String) -> void:
+	_authorize_fix(_peer_of_sender(multiplayer.get_remote_sender_id()), prop_id)
+
+
+func _authorize_fix(fixer_pid: int, prop_id: String) -> void:
+	if not _is_authority() or _phase == PHASE_ENDED:
+		return
+	var fixer: Node = _find_climber_by_id(fixer_pid)
+	if fixer == null or bool(fixer.get("dead")) or bool(fixer.get("ragdoll_active")):
+		return
+	var prop: Node = _props.get(prop_id)
+	if prop == null or int(prop.get("kind")) == ClimbProp.Kind.BUCKET:
+		_notify("THIS OBJECT CANNOT BE FIXED")
+		return
+	var carrier_pid := int(prop.get("carrier_id"))
+	if carrier_pid == fixer_pid:
+		_notify("A TEAMMATE MUST HOLD IT WHILE YOU FIX")
+		return
+	if fixer.global_position.distance_to(prop.global_position) > FIX_REACH:
+		_notify("TOO FAR TO FIX")
+		return
+	var next_value: bool = not bool(prop.get("is_fixed"))
+	if next_value and carrier_pid > 0 and _carry_links.has(carrier_pid):
+		_clear_carry_link(carrier_pid, true)
+	prop.call("set_fixed", next_value)
+	_broadcast_prop_fixed(prop_id, next_value)
+	var verb := "FIXED" if next_value else "RELEASED"
+	_notify("%s %s" % [str(prop.get("display_name")).to_upper(), verb])
+
+
+func _broadcast_prop_fixed(prop_id: String, value: bool) -> void:
+	if not _has_network() or not _is_authority():
+		return
+	for pid in _remote_targets():
+		rpc_id(pid, "rpc_apply_prop_fixed", prop_id, value)
+
+
+@rpc("authority", "call_remote", "reliable")
+func rpc_apply_prop_fixed(prop_id: String, value: bool) -> void:
+	var prop: Node = _props.get(prop_id)
+	if prop != null and prop.has_method("set_fixed"):
+		prop.call("set_fixed", value)
 
 
 func request_drop() -> void:
@@ -505,6 +578,65 @@ func _authorize_drop(pid: int) -> void:
 			_clear_carry_link(carrier_pid, true)
 
 
+func request_bandage_revive(target_pid: int) -> void:
+	if _is_authority():
+		_authorize_bandage_revive(_local_id, target_pid)
+		return
+	rpc_id(1, "rpc_request_bandage_revive", target_pid)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_request_bandage_revive(target_pid: int) -> void:
+	_authorize_bandage_revive(_peer_of_sender(multiplayer.get_remote_sender_id()), target_pid)
+
+
+func _authorize_bandage_revive(helper_pid: int, target_pid: int) -> void:
+	if not _is_authority() or _phase == PHASE_ENDED:
+		return
+	var helper: Node = _find_climber_by_id(helper_pid)
+	var target: Node = _find_climber_by_id(target_pid)
+	if helper == null or target == null or helper_pid == target_pid:
+		return
+	if bool(helper.get("dead")) or bool(helper.get("ragdoll_active")) or int(helper.get("carried_by_peer")) > 0:
+		return
+	if bool(target.get("dead")) or not bool(target.get("unconscious")):
+		_notify("NO DOWNED TEAMMATE")
+		return
+	var carrier_pid := int(target.get("carried_by_peer"))
+	if carrier_pid != 0 and carrier_pid != helper_pid:
+		_notify("TEAMMATE ALREADY CARRIED")
+		return
+	if helper.global_position.distance_to(target.global_position) > REVIVE_REACH:
+		_notify("TOO FAR TO REVIVE")
+		return
+	if _carry_links.has(helper_pid):
+		var link: Dictionary = _carry_links[helper_pid]
+		if int(link.get("kind", -1)) == 1 and str(link.get("target_id", "")) == str(target_pid):
+			_clear_carry_link(helper_pid, true)
+	_apply_bandage_revive(target_pid, helper_pid)
+	_broadcast_bandage_revive(target_pid, helper_pid)
+
+
+func _apply_bandage_revive(target_pid: int, helper_pid: int) -> void:
+	var target: Node = _find_climber_by_id(target_pid)
+	if target != null and target.has_method("revive_with_bandage"):
+		target.call("revive_with_bandage", helper_pid)
+	if helper_pid == _local_id:
+		_notify("TEAMMATE REVIVED")
+
+
+func _broadcast_bandage_revive(target_pid: int, helper_pid: int) -> void:
+	if not _has_network() or not _is_authority():
+		return
+	for pid in _remote_targets():
+		rpc_id(pid, "rpc_apply_bandage_revive", target_pid, helper_pid)
+
+
+@rpc("authority", "call_remote", "reliable")
+func rpc_apply_bandage_revive(target_pid: int, helper_pid: int) -> void:
+	_apply_bandage_revive(target_pid, helper_pid)
+
+
 func _apply_carry_link(carrier_pid: int, kind: int, target_id: String) -> void:
 	var carrier: Node = _find_climber_by_id(carrier_pid)
 	if kind == -1:
@@ -522,6 +654,10 @@ func _apply_carry_link(carrier_pid: int, kind: int, target_id: String) -> void:
 		var target: Node = _find_climber_by_id(int(target_id))
 		if target != null and target.has_method("set_carried_by"):
 			target.call("set_carried_by", carrier_pid)
+	elif kind == 2:
+		var tail: Node = _find_tail_by_owner(int(target_id))
+		if tail != null and tail.has_method("set_carrier"):
+			tail.call("set_carrier", carrier_pid)
 
 	carrier.call("set_carry", kind, target_id)
 	_carry_links[carrier_pid] = {"kind": kind, "target_id": target_id}
@@ -548,6 +684,19 @@ func _clear_carry_link(carrier_pid: int, broadcast: bool) -> void:
 		var target: Node = _find_climber_by_id(int(target_id))
 		if target != null and target.has_method("set_carried_by"):
 			target.call("set_carried_by", 0)
+	elif kind == 2:
+		var tail: Node = _find_tail_by_owner(int(target_id))
+		if tail != null and tail.has_method("set_carrier"):
+			var throw_dir := Vector3.FORWARD
+			var throw_origin := Vector3.ZERO
+			if carrier != null:
+				throw_dir = -carrier.global_transform.basis.z.normalized()
+				throw_dir.y = 0.0
+				throw_origin = carrier.linear_velocity
+				if throw_dir.length_squared() < 0.001:
+					throw_dir = Vector3.FORWARD
+			var velocity: Vector3 = throw_origin + throw_dir.normalized() * 12.0 + (Vector3.UP * 4.5)
+			tail.call("set_carrier", 0, velocity)
 
 
 func _broadcast_carry_link(carrier_pid: int, kind: int, target_id: String) -> void:
@@ -578,11 +727,15 @@ func _check_carry_links() -> void:
 		var kind := int(link.get("kind", -1))
 		if kind == 0:
 			var prop: Node = _props.get(str(link.get("target_id", "")))
-			if prop == null or int(prop.get("carrier_id")) != carrier_pid:
+			if prop == null or int(prop.get("carrier_id")) != carrier_pid or bool(prop.get("is_fixed")):
 				_clear_carry_link(carrier_pid, true)
 		elif kind == 1:
 			var target: Node = _find_climber_by_id(int(link.get("target_id", "0")))
-			if target == null or bool(target.get("dead")) or bool(target.get("ragdoll_active")):
+			if target == null or bool(target.get("dead")) or int(target.get("carried_by_peer")) != carrier_pid:
+				_clear_carry_link(carrier_pid, true)
+		elif kind == 2:
+			var tail: Node = _find_tail_by_owner(int(link.get("target_id", "0")))
+			if tail == null or int(tail.get("carrier_id")) != carrier_pid:
 				_clear_carry_link(carrier_pid, true)
 
 
@@ -622,8 +775,19 @@ func _apply_item_taken(item_id: String, receiver_id: int, amount: float) -> void
 	if receiver_id != _local_id:
 		return
 	var receiver: Node = _find_climber_by_id(receiver_id)
-	if receiver != null and receiver.has_method("equip_jetpack"):
-		receiver.call("equip_jetpack", amount)
+	if receiver == null:
+		return
+	var kind := 0
+	if item != null:
+		var kind_value: Variant = item.get("item_kind")
+		if kind_value != null:
+			kind = int(kind_value)
+	if kind == ClimbItemPickup.Kind.BANDAGE:
+		if receiver.has_method("add_bandage"):
+			receiver.call("add_bandage", int(amount))
+	else:
+		if receiver.has_method("equip_jetpack"):
+			receiver.call("equip_jetpack", amount)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -721,7 +885,8 @@ func rpc_prop_states(states: Array) -> void:
 			continue
 		var prop: Node = _props.get(str(fields[0]))
 		if prop != null and prop.has_method("apply_state"):
-			prop.call("apply_state", fields[1], fields[2], fields[3])
+			var fixed_value: bool = bool(fields[5]) if fields.size() >= 6 else false
+			prop.call("apply_state", fields[1], fields[2], fields[3], fixed_value)
 			if fields.size() >= 5 and prop.has_method("set_water"):
 				prop.call("set_water", float(fields[4]))
 
@@ -734,6 +899,10 @@ func _on_level_hazard(kind: int, hazard_label: String, body: Node) -> void:
 			_notify("WIND GUST - brace yourself!")
 	elif kind == HAZARD_SCRIPT.Type.BRITTLE and _is_authority():
 		_notify(hazard_label)
+	elif kind == HAZARD_SCRIPT.Type.ENEMY and _is_authority():
+		if int(body.get("peer_id")) == _local_id:
+			_notify("ENEMY STRIKE - use a bandage")
+			_play_fx("warning", -6.0)
 
 
 func _on_local_ragdoll_started() -> void:
@@ -822,7 +991,7 @@ func _process(delta: float) -> void:
 func _update_altitudes() -> void:
 	for key in _climbers.keys():
 		var entry: Dictionary = _players_state.get(key, {})
-		if entry.is_empty() or bool(entry.get("spectator", false)):
+		if entry.is_empty():
 			continue
 		var climber: Node = _climbers[key]
 		if not is_instance_valid(climber) or not climber.is_inside_tree():
@@ -868,9 +1037,8 @@ func _update_water_objective() -> void:
 
 func _score_for(entry: Dictionary) -> int:
 	var altitude := maxf(0.0, float(entry.get("highest_y", 0.0)))
-	var lives := maxi(0, int(entry.get("lives", 0)))
 	var penalty := maxf(0.0, float(entry.get("penalty", 0.0)))
-	return int(round(altitude * 10.0)) + lives * 100 - int(round(penalty))
+	return int(round(altitude * 10.0)) - int(round(penalty))
 
 
 func _best_player_id() -> int:
@@ -911,11 +1079,9 @@ func _pack_state() -> Array:
 			int(key),
 			str(entry.get("name", "Climber")),
 			entry.get("color", Color.WHITE),
-			int(entry.get("lives", 0)),
 			float(entry.get("highest_y", 0.0)),
 			float(entry.get("checkpoint_y", 0.0)),
 			float(entry.get("penalty", 0.0)),
-			bool(entry.get("spectator", false)),
 			int(_score_for(entry))
 		])
 	return packed
@@ -926,18 +1092,16 @@ func _apply_snapshot(snapshot: Array) -> void:
 		if not item is Array:
 			continue
 		var fields: Array = item
-		if fields.size() < 9:
+		if fields.size() < 7:
 			continue
 		var pid := int(fields[0])
 		var entry: Dictionary = _players_state.get(pid, _new_player_state(pid, str(fields[1]), Color.WHITE))
 		entry["name"] = str(fields[1])
 		entry["color"] = fields[2]
-		entry["lives"] = int(fields[3])
-		entry["highest_y"] = float(fields[4])
-		entry["checkpoint_y"] = float(fields[5])
-		entry["penalty"] = float(fields[6])
-		entry["spectator"] = bool(fields[7])
-		entry["score"] = int(fields[8])
+		entry["highest_y"] = float(fields[3])
+		entry["checkpoint_y"] = float(fields[4])
+		entry["penalty"] = float(fields[5])
+		entry["score"] = int(fields[6])
 		_players_state[pid] = entry
 
 

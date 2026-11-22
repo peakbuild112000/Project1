@@ -1,3 +1,10 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Signaling relay dependencies
+tools/node_modules/
+tools/package-lock.json
+
+.DS_Store
+*.tmp

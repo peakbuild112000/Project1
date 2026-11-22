@@ -17,11 +17,14 @@ const DEFAULT_NAME := "Climber"
 const MATCH_SCENE := "res://scenes/game.tscn"
 const MENU_SCENE := "res://scenes/main_menu.tscn"
 const MAX_CHAT_ENTRIES := 60
+const WEB_RTC_SCRIPT = preload("res://scripts/network/web_rtc_room.gd")
 
 var peer_id: int = 0
 var is_host: bool = false
 var player_name: String = DEFAULT_NAME
 var port: int = DEFAULT_PORT
+var web_room: String = ""
+var match_seed: int = 0
 
 ## Keyed by peer id. Every value has at least name, color and ready.
 var players: Dictionary[int, Dictionary] = {}
@@ -29,6 +32,7 @@ var recent_chat: Array[Dictionary] = []
 var max_players: int = 4
 
 var _enet_peer: ENetMultiplayerPeer
+var _web_rtc: Node = null
 var _last_address: String = "127.0.0.1"
 var _match_starting: bool = false
 var _match_started: bool = false
@@ -36,6 +40,13 @@ var _resetting: bool = false
 
 
 func _ready() -> void:
+	_web_rtc = WEB_RTC_SCRIPT.new()
+	_web_rtc.name = "WebRTCRoom"
+	add_child(_web_rtc)
+	_web_rtc.room_ready.connect(_on_web_room_ready)
+	_web_rtc.failed.connect(_on_web_room_failed)
+	_web_rtc.peer_left.connect(_on_web_peer_left)
+
 	multiplayer.peer_connected.connect(_on_multiplayer_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_multiplayer_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -49,7 +60,7 @@ func _ready() -> void:
 
 func create_server(p_player_name: String, p_max_players: int = 4, p_port: int = 7777) -> void:
 	if OS.has_feature("web"):
-		connection_failed.emit("ENet hosting is not available in the browser. Use SOLO mode.")
+		connection_failed.emit("ENet hosting is not available in the browser. Use a WebRTC room instead.")
 		return
 	_reset_transport(false)
 	player_name = _clean_name(p_player_name)
@@ -80,7 +91,7 @@ func create_server(p_player_name: String, p_max_players: int = 4, p_port: int = 
 
 func join_server(p_player_name: String, address: String, p_port: int = 7777) -> void:
 	if OS.has_feature("web"):
-		connection_failed.emit("ENet joining is not available in the browser. Use SOLO mode.")
+		connection_failed.emit("ENet joining is not available in the browser. Use a WebRTC room instead.")
 		return
 	_reset_transport(false)
 	player_name = _clean_name(p_player_name)
@@ -104,31 +115,36 @@ func join_server(p_player_name: String, address: String, p_port: int = 7777) -> 
 	multiplayer.multiplayer_peer = _enet_peer
 
 
+## Web/desktop room over WebRTC. Browsers cannot open UDP sockets, so this is
+## the multiplayer path used by the Web build. `create_server()` remains the
+## ENet-only API and keeps its explicit browser rejection.
+func create_web_room(p_player_name: String, p_signal_url: String, p_room: String, p_max_players: int = 4) -> void:
+	_reset_transport(false)
+	player_name = _clean_name(p_player_name)
+	if player_name.is_empty():
+		player_name = DEFAULT_NAME
+	max_players = clampi(p_max_players, 2, 4)
+	is_host = true
+	web_room = p_room.strip_edges().to_upper()
+	_web_rtc.call("start_host", p_signal_url, web_room, max_players)
+
+
+func join_web_room(p_player_name: String, p_signal_url: String, p_room: String) -> void:
+	_reset_transport(false)
+	player_name = _clean_name(p_player_name)
+	if player_name.is_empty():
+		player_name = DEFAULT_NAME
+	is_host = false
+	web_room = p_room.strip_edges().to_upper()
+	_web_rtc.call("start_client", p_signal_url, web_room)
+
+
 func start_match() -> void:
 	if not is_host or not multiplayer.is_server() or _match_starting:
 		return
 	_match_starting = true
-	rpc("_rpc_start_match")
-
-
-## Starts a local match without opening a UDP socket. Used by the Web demo,
-## where browsers cannot host ENet, and by anyone who wants a quick solo run.
-func start_solo() -> void:
-	var requested_name := _clean_name(player_name)
-	if requested_name.is_empty():
-		requested_name = DEFAULT_NAME
-	_reset_transport(false)
-	player_name = requested_name
-	is_host = true
-	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-	peer_id = multiplayer.get_unique_id()
-	if peer_id <= 0:
-		peer_id = 1
-	players[peer_id] = _make_player_entry(player_name, peer_id, true)
-	_match_started = true
-	var error: Error = get_tree().change_scene_to_file(MATCH_SCENE)
-	if error != OK:
-		push_warning("Unable to load %s: %s" % [MATCH_SCENE, error_string(error)])
+	match_seed = 20261121 + (Time.get_ticks_msec() % 100000)
+	rpc("_rpc_start_match", match_seed)
 
 
 func leave() -> void:
@@ -222,6 +238,8 @@ func _on_multiplayer_connection_failed() -> void:
 	if _resetting:
 		return
 	var message := "Could not connect to %s:%d. Check the address and firewall." % [_last_address, port]
+	if not web_room.is_empty():
+		message = "The WebRTC room connection failed. Check the signaling URL and room code."
 	_reset_transport(false)
 	connection_failed.emit(message)
 
@@ -229,9 +247,12 @@ func _on_multiplayer_connection_failed() -> void:
 func _on_multiplayer_server_disconnected() -> void:
 	if _resetting:
 		return
+	var message := "The host ended the session."
+	if not web_room.is_empty():
+		message = "The WebRTC host ended the room."
 	_reset_transport(false)
 	disconnected.emit()
-	connection_failed.emit("The host ended the session.")
+	connection_failed.emit(message)
 
 
 # ---------------------------------------------------------------------------
@@ -307,14 +328,48 @@ func _rpc_chat_broadcast(sender: int, text: String) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _rpc_start_match() -> void:
+func _rpc_start_match(seed_value: int) -> void:
 	if _match_started:
 		return
+	match_seed = seed_value
 	_match_started = true
 	match_started.emit()
 	var error: Error = get_tree().change_scene_to_file(MATCH_SCENE)
 	if error != OK:
 		push_warning("Unable to load %s: %s" % [MATCH_SCENE, error_string(error)])
+
+
+# ---------------------------------------------------------------------------
+# WebRTC room callbacks
+# ---------------------------------------------------------------------------
+
+func _on_web_room_ready(assigned_id: int, room: String) -> void:
+	web_room = room
+	multiplayer.multiplayer_peer = _web_rtc.get_multiplayer_peer()
+	peer_id = multiplayer.get_unique_id()
+	if peer_id <= 0:
+		peer_id = assigned_id
+	if is_host:
+		players[1] = _make_player_entry(player_name, 1, true)
+		hosted.emit()
+	else:
+		players[peer_id] = _make_player_entry(player_name, peer_id, false)
+	connected.emit()
+	lobby_changed.emit()
+
+
+func _on_web_room_failed(message: String) -> void:
+	_reset_transport(false)
+	connection_failed.emit(message)
+
+
+func _on_web_peer_left(left_id: int) -> void:
+	if not is_host or left_id <= 1 or not players.has(left_id):
+		return
+	players.erase(left_id)
+	peer_disconnected.emit(left_id)
+	_broadcast_lobby()
+	lobby_changed.emit()
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +446,8 @@ func _reset_transport(emit_disconnected: bool = false) -> void:
 	if _enet_peer != null:
 		_enet_peer.close()
 		_enet_peer = null
+	if _web_rtc != null:
+		_web_rtc.call("close_room")
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer = null
 
@@ -400,6 +457,8 @@ func _reset_transport(emit_disconnected: bool = false) -> void:
 	recent_chat.clear()
 	port = DEFAULT_PORT
 	max_players = 4
+	web_room = ""
+	match_seed = 0
 	_last_address = "127.0.0.1"
 	_match_starting = false
 	_match_started = false

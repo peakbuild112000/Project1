@@ -8,6 +8,7 @@ enum Kind { CRATE, PLANK, TRAMPOLINE, BUCKET }
 
 signal carrier_changed(peer_id: int)
 signal water_changed(value: float)
+signal fixed_changed(value: bool)
 
 @export var prop_id: String = ""
 @export var kind: Kind = Kind.CRATE
@@ -17,10 +18,12 @@ signal water_changed(value: float)
 
 var carrier_id: int = 0
 var water: float = 100.0
+var is_fixed: bool = false
 
 const BUCKET_HEIGHT: float = 1.6
 
 var _water_mesh: MeshInstance3D = null
+var _fixed_material: StandardMaterial3D = null
 var _target_transform: Transform3D = Transform3D.IDENTITY
 var _target_linear: Vector3 = Vector3.ZERO
 var _target_angular: Vector3 = Vector3.ZERO
@@ -115,6 +118,40 @@ func set_water(value: float) -> void:
 	water_changed.emit(water)
 
 
+## A fixed prop becomes a static platform. The host authorises the change;
+## peers only apply it so the glow and collision behaviour stay in sync.
+func set_fixed(value: bool) -> void:
+	if is_fixed == value:
+		return
+	is_fixed = value
+	if value:
+		freeze = true
+		freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
+		carrier_id = 0
+	else:
+		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		freeze = false
+	_apply_fixed_visual()
+	fixed_changed.emit(value)
+
+
+func _apply_fixed_visual() -> void:
+	if _fixed_material == null:
+		_fixed_material = StandardMaterial3D.new()
+		_fixed_material.albedo_color = Color(0.22, 0.92, 0.82, 0.30)
+		_fixed_material.emission_enabled = true
+		_fixed_material.emission = Color(0.12, 0.88, 0.76)
+		_fixed_material.emission_energy_multiplier = 1.1
+		_fixed_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	for node in find_children("*", "MeshInstance3D", true, false):
+		var instance := node as MeshInstance3D
+		if instance == null or instance == _water_mesh:
+			continue
+		instance.material_overlay = _fixed_material if is_fixed else null
+
+
 func can_be_grappled() -> bool:
 	return kind == Kind.BUCKET and carrier_id == 0
 
@@ -169,15 +206,17 @@ func set_carrier(peer_id: int) -> void:
 	carrier_changed.emit(peer_id)
 
 
-func apply_state(transform_value: Transform3D, linear_value: Vector3, angular_value: Vector3) -> void:
+func apply_state(transform_value: Transform3D, linear_value: Vector3, angular_value: Vector3, fixed_value: bool = false) -> void:
 	_target_transform = transform_value
 	_target_linear = linear_value
 	_target_angular = angular_value
 	_has_target = true
+	if fixed_value != is_fixed:
+		set_fixed(fixed_value)
 
 
 func pack_state() -> Array:
-	return [prop_id, global_transform, linear_velocity, angular_velocity, water]
+	return [prop_id, global_transform, linear_velocity, angular_velocity, water, is_fixed]
 
 
 func _is_server() -> bool:
@@ -209,7 +248,9 @@ func _update_spill(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if kind == Kind.BUCKET:
 		_update_spill(delta)
-	if not _has_target:
+	# An anchored prop is a static platform; never interpolate it towards a
+	# stale carried transform or it slowly drifts away from the climber.
+	if is_fixed or not _has_target:
 		return
 	var own_id := 0
 	var api: MultiplayerAPI = get_multiplayer()

@@ -4,7 +4,7 @@ class_name ClimbHazard
 ## Reusable trigger volumes plus the two small moving/breaking body classes
 ## used by the tower generator. Everything is built from engine primitives.
 
-enum Type { WIND, CHECKPOINT, SUMMIT, BRITTLE }
+enum Type { WIND, CHECKPOINT, SUMMIT, BRITTLE, ENEMY }
 
 signal hazard_triggered(kind: int, label: String, body: Node)
 signal checkpoint_reached(height: float, body: Node)
