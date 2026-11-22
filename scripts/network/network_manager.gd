@@ -25,6 +25,8 @@ var player_name: String = DEFAULT_NAME
 var port: int = DEFAULT_PORT
 var web_room: String = ""
 var match_seed: int = 0
+## Local class choice. It is stored in every lobby entry before match start.
+var character_type: int = CharacterType.STRONG
 
 ## Keyed by peer id. Every value has at least name, color and ready.
 var players: Dictionary[int, Dictionary] = {}
@@ -172,6 +174,21 @@ func set_ready(ready: bool) -> void:
 		rpc_id(1, "_rpc_set_ready", ready)
 
 
+func set_character_type(value: int) -> void:
+	if not CharacterType.is_valid(value):
+		return
+	character_type = value
+	if players.has(peer_id):
+		var entry: Dictionary = players[peer_id]
+		entry["character_type"] = value
+		players[peer_id] = entry
+	lobby_changed.emit()
+	if is_host:
+		_broadcast_lobby()
+	elif peer_id > 0 and multiplayer.multiplayer_peer != null:
+		rpc_id(1, "_rpc_register_character", value)
+
+
 func send_chat(message: String) -> void:
 	var text := message.strip_edges()
 	if text.is_empty():
@@ -231,7 +248,7 @@ func _on_connected_to_server() -> void:
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
 	connected.emit()
 	lobby_changed.emit()
-	rpc_id(1, "_rpc_register_name", player_name)
+	rpc_id(1, "_rpc_register_name", player_name, character_type)
 
 
 func _on_multiplayer_connection_failed() -> void:
@@ -260,7 +277,7 @@ func _on_multiplayer_server_disconnected() -> void:
 # ---------------------------------------------------------------------------
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_register_name(requested_name: String) -> void:
+func _rpc_register_name(requested_name: String, character_value: int = CharacterType.STRONG) -> void:
 	if _resetting or not multiplayer.is_server():
 		return
 	var sender := multiplayer.get_remote_sender_id()
@@ -272,6 +289,24 @@ func _rpc_register_name(requested_name: String) -> void:
 	entry["name"] = _clean_name(requested_name)
 	if entry["name"].is_empty():
 		entry["name"] = _default_name_for(sender)
+	if CharacterType.is_valid(character_value):
+		entry["character_type"] = character_value
+	players[sender] = entry
+	lobby_changed.emit()
+	_broadcast_lobby()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_register_character(character_value: int) -> void:
+	if _resetting or not multiplayer.is_server():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender <= 1 or not players.has(sender):
+		return
+	if not CharacterType.is_valid(character_value):
+		return
+	var entry: Dictionary = players[sender]
+	entry["character_type"] = character_value
 	players[sender] = entry
 	lobby_changed.emit()
 	_broadcast_lobby()
@@ -303,6 +338,7 @@ func _rpc_apply_lobby(snapshot: Dictionary) -> void:
 			"name": str(value.get("name", _default_name_for(id))),
 			"color": value.get("color", _color_for_peer(id)),
 			"ready": bool(value.get("ready", false)),
+			"character_type": int(value.get("character_type", CharacterType.STRONG)),
 		}
 	if peer_id > 0 and not players.has(peer_id):
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
@@ -414,6 +450,7 @@ func _make_player_entry(display_name: String, id: int, ready: bool) -> Dictionar
 		"name": clean,
 		"color": _color_for_peer(id),
 		"ready": ready,
+		"character_type": character_type if id == peer_id or peer_id <= 0 else CharacterType.STRONG,
 	}
 
 

@@ -1,4 +1,4 @@
-# Errors encountered and how they were fixed
+﻿# Errors encountered and how they were fixed
 
 This log is kept in English on purpose. It records the real problems found while
 building, testing and publishing the project, not a hypothetical bug list.
@@ -500,3 +500,39 @@ ends in `died("unconscious")`; being carried pauses it but still requires a
 bandage. The HUD banner shows the remaining seconds. Validation and smoke
 tests cover the removed solo API, feet/tail nodes, door clearance, critical
 collapse, timer death and carry pause.
+
+## 25. Two character classes were missing from the climb mechanics
+
+**Symptom**
+
+Every climber was identical: any awake teammate could be carried, and every
+climber had a usable grappling tail. The requested Strong/Elastic duo could not
+perform its signature moves: a Strong throwing an Elastic teammate higher,
+and an Elastic tensioning its tail into a rope for the Strong to climb.
+
+**Cause**
+
+`Climber.configure()` carried no type information, `Net.players` entries stored
+only name/colour/ready, and `_authorize_carry()` accepted any awake climber as a
+passenger. `TailRope.can_be_grappled()` only checked for a live owner, so all
+tails behaved the same. Dropping a passenger called `set_carried_by(0)` with no
+throw impulse.
+
+**Fix**
+
+`scripts/game/character_type.gd` defines `STRONG` and `ELASTIC`. The lobby adds
+a class selector; `Net.set_character_type()` and `_rpc_register_character()`
+transport the choice into every lobby entry, and `_spawn_climber()` passes it to
+`Climber.configure()` and `get_state()`. `can_carry_climber()` and
+`_authorize_carry()` allow anyone to carry a downed teammate but restrict awake
+passengers to a Strong carrying an Elastic. `_clear_carry_link()` calls
+`Climber.launch_from_carry()` with forward + upward velocity when that pair is
+released, so the Elastic is thrown high toward the carrier's camera direction.
+
+`TailRope` now takes an `elastic` flag: a Strong tail is hidden, has no
+collision and cannot be grappled. An Elastic holds `Q` to call `set_tension()`,
+which stretches a kinematic rope body toward the camera and replicates through
+`rpc_apply_tension`; the HUD shows `Q: ROPE TAIL`, and stamina drains while the
+rope is out. The full validation and gameplay smoke suites were extended to
+check type APIs, gating, the throw impulse and tail gating, and they pass with
+`RESULT PASSED`.

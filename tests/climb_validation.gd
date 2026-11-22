@@ -32,7 +32,7 @@ func _initialize() -> void:
 	var actions := [
 		"arm_left", "arm_right", "jump", "move_forward", "move_back",
 		"move_left", "move_right", "carry", "fix_prop", "jetpack", "bandage",
-		"drop_jetpack", "winch_up", "winch_down", "chat", "scoreboard",
+		"drop_jetpack", "winch_up", "winch_down", "tail_stretch", "chat", "scoreboard",
 	]
 	for action in actions:
 		check(InputMap.has_action(action), "Missing input action: " + action)
@@ -41,7 +41,7 @@ func _initialize() -> void:
 	check(net != null, "Net autoload missing")
 	if net != null:
 		check(not net.has_method("start_solo"), "Solo match entry point must be removed")
-		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data"]:
+		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "set_character_type"]:
 			check(net.has_method(method), "Net missing method: " + method)
 		var rtc := net.get_node_or_null("WebRTCRoom")
 		check(rtc != null, "Net missing WebRTCRoom transport")
@@ -53,9 +53,9 @@ func _initialize() -> void:
 	if climber_scene != null:
 		var climber := climber_scene.instantiate() as Node
 		root.add_child(climber)
-		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left"]:
+		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry"]:
 			check(climber.has_method(method), "Climber missing method: " + method)
-		for prop in ["peer_id", "display_name", "player_color", "current_stamina", "max_stamina", "stamina_lock", "stretch", "ragdoll_active", "unconscious", "persistent_unconscious", "unconscious_time", "death_progress", "fall_time", "highest_y", "checkpoint_y", "is_local", "injury", "bandages"]:
+		for prop in ["peer_id", "display_name", "player_color", "character_type", "current_stamina", "max_stamina", "stamina_lock", "stretch", "ragdoll_active", "unconscious", "persistent_unconscious", "unconscious_time", "death_progress", "fall_time", "highest_y", "checkpoint_y", "is_local", "injury", "bandages"]:
 			check(climber.get(prop) != null or climber.get_property_list().any(func(p): return p.name == prop), "Climber missing property: " + prop)
 		for sig in ["stamina_changed", "stamina_lock_changed", "stretch_changed", "ragdoll_started", "ragdoll_ended", "unconscious_changed", "revived", "died", "checkpoint_reached", "summit_reached", "bandages_changed", "injury_changed", "fall_damage", "notice_requested"]:
 			check(climber.has_signal(sig), "Climber missing signal: " + sig)
@@ -74,6 +74,14 @@ func _initialize() -> void:
 			check(tail.has_method("can_be_grappled"), "Tail cannot be grappled")
 		check(climber.has_method("_hands_full_with_bucket"), "Bucket two-hand hold missing")
 		check(float(climber.get("unconscious_death_time")) > 0.0, "Unconscious death timer missing")
+		check(int(climber.get("character_type")) == CharacterType.STRONG, "Climbers default to Strong")
+		check(bool(climber.call("is_strong")), "Default climber is not Strong")
+		check(not bool(climber.call("is_elastic")), "Default climber is Elastic")
+		check(float(climber.get("tail_tension_drain")) > 0.0, "Tail tension drain missing")
+		climber.call("set_character_type", CharacterType.ELASTIC)
+		check(bool(climber.call("is_elastic")), "set_character_type did not switch to Elastic")
+		check(int(climber.call("get_state").get("character_type", -1)) == CharacterType.ELASTIC, "Type not replicated in state")
+		climber.call("set_character_type", CharacterType.STRONG)
 		climber.call("set_stamina_lock", 0.0)
 		climber.call("apply_fall_impact", 14.0, 0.0)
 		var short_lock: float = float(climber.get("stamina_lock"))
@@ -108,6 +116,8 @@ func _initialize() -> void:
 		var manager_instance = manager_script.new()
 		check(manager_instance.has_method("request_bandage_revive"), "GameManager missing bandage revive request")
 		check(manager_instance.has_method("_find_tail_by_owner"), "GameManager missing tail lookup")
+		check(manager_instance.has_method("is_strong_climber"), "GameManager missing Strong check")
+		check(manager_instance.has_method("is_elastic_climber"), "GameManager missing Elastic check")
 		manager_instance.free()
 
 	for script_path in ["res://scripts/network/network_manager.gd", "res://scripts/ui/main_menu.gd"]:

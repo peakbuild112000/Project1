@@ -62,14 +62,20 @@ on UDP port `7777`.
 - The bucket can be carried with `F`, pushed with the body, or hooked with either
   hand. Pulling it sideways tips it and spills water. Carrying it uses both
   hands visibly.
-- Any teammate can be grabbed and carried, awake or unconscious; the carrier
-  pays the stamina cost and the passenger stops controlling their body. A downed
-  teammate has a death countdown, which pauses while carried, but they stay down
-  until someone spends a bandage on them.
-- Every climber has a short grappling tail. A teammate can hook it to climb up,
-  or grab it with `F`, carry it and throw it; it flies briefly and then returns
-  to its owner. Feet are animated, and walking and jumping work even when both
-  hands are occupied. The bucket is held with two hands.
+- Two character classes are chosen in the lobby: **Strong** and **Elastic**.
+  A Strong climber can grab an awake Elastic teammate with `F`, carry them and
+  press `F` again to throw them forward and high toward the direction the Strong
+  climber is looking. Any class can carry a downed teammate to safety, but an
+  awake climber can only be lifted by a Strong carrying an Elastic.
+- The **Elastic** climber owns a rope tail. Hold `Q` to stretch it into a long
+  grappling line toward the camera; a Strong teammate can hook that line with a
+  hand and climb it. The Elastic pays stamina while the rope is stretched. The
+  tail can also be grabbed with `F`, carried and thrown; it flies briefly and
+  then returns to its owner. Strong climbers have no usable rope tail.
+- A downed teammate has a death countdown, which pauses while carried, but they
+  stay down until someone spends a bandage on them. Feet are animated, and
+  walking and jumping work even when both hands are occupied. The bucket is held
+  with two hands.
 - One jetpack slot only. Fuel can be refilled, but the item never duplicates.
 - Starting cabin with control pictograms and a large
   **BRING WATER TO YOUR HOUSE** mission sign in the world.
@@ -115,6 +121,7 @@ The main menu opens first.
 | Space | Jump, release, mantle near a ledge |
 | Mouse wheel | Winch in / let out rope |
 | F | Grab or release the nearest free object, teammate or grappling tail |
+| Q (hold, Elastic only) | Stretch the rope tail toward the camera for a teammate to climb |
 | E | Fix or release a nearby crate/plank (coop scaffolding) |
 | Shift (hold) | Use the equipped jetpack |
 | B | Use a bandage on yourself, or on a nearby/carried downed teammate |
@@ -156,9 +163,11 @@ The main menu opens first.
   stable step or bridge; anyone nearby can release it again with `E`.
 - If internal effort stays in the red zone, your hands let go and you ragdoll,
   dropping every anchor and carried object. There is no effort bar or carry slot
-  readout. Any nearby teammate can be picked up with `F`; a downed teammate can
-  be carried, dropped with `F`, and revived with `B` while holding a bandage.
-- There is no manual stretch button and no ball mode. The camera stays at head
+  readout. A downed teammate can be carried, dropped with `F`, and revived with
+  `B` while holding a bandage. A Strong climber can also carry an awake Elastic
+  teammate and throw them high by pressing `F` again.
+- There is no manual arm-stretch button and no ball mode. `Q` is not an arm
+  stretch: it tensions the Elastic rope tail only. The camera stays at head
   height and does not roll. A soft ground blob shadow replaces the long arm
   silhouette.
 

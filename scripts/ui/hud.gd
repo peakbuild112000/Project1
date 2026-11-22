@@ -24,6 +24,7 @@ var _stamina_lock_fill: ColorRect
 var _fix_label: Label
 var _jetpack_label: Label
 var _load_label: Label
+var _type_label: Label
 var _bandage_label: Label
 var _jetpack_remove_button: Button
 var _ragdoll_banner: Label
@@ -187,6 +188,8 @@ func _build_bars() -> void:
 	box.add_child(_jetpack_label)
 	_load_label = _make_label("LOAD 0 kg", 13, TEXT_COLOR)
 	box.add_child(_load_label)
+	_type_label = _make_label("CLASS STRONG", 13, Color(0.62, 0.82, 1.0))
+	box.add_child(_type_label)
 	_bandage_label = _make_label("BANDAGES 0  [B]", 13, Color(1.0, 0.72, 0.65))
 	box.add_child(_bandage_label)
 	_jetpack_remove_button = Button.new()
@@ -538,6 +541,10 @@ func _process(delta: float) -> void:
 		if _local_climber.has_method("get_total_weight"):
 			weight = float(_local_climber.call("get_total_weight"))
 		_load_label.text = "LOAD %.0f kg" % weight
+		var class_value := int(_local_climber.get("character_type"))
+		_type_label.text = "CLASS %s" % CharacterType.label(class_value)
+		if class_value == CharacterType.ELASTIC:
+			_type_label.text += "  [Q: ROPE TAIL]"
 		_bandage_label.text = "BANDAGES %d  [B]" % maxi(0, int(_local_climber.get("bandages")))
 		var ragdoll := bool(_local_climber.get("ragdoll_active"))
 		if ragdoll and not _was_ragdoll:

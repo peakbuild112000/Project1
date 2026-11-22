@@ -17,6 +17,8 @@ var _signal_field: LineEdit
 var _room_field: LineEdit
 var _port_field: SpinBox
 var _players_option: OptionButton
+var _character_option: OptionButton
+var _class_hint: Label
 var _error_label: Label
 var _hint_label: Label
 var _host_button: Button
@@ -33,6 +35,7 @@ var _start_button: Button
 var _leave_button: Button
 var _lobby_status: Label
 var _host_tag: Label
+var _character_button: Button
 
 
 func _ready() -> void:
@@ -126,6 +129,17 @@ func _build_menu_panel() -> PanelContainer:
 	_name_field = _make_field("Your display name", DEFAULT_DISPLAY_NAME)
 	inner.add_child(_make_row("Display name", _name_field))
 
+	_character_option = OptionButton.new()
+	_character_option.custom_minimum_size = Vector2(0, 44)
+	_character_option.add_item("STRONG", CharacterType.STRONG)
+	_character_option.add_item("ELASTIC", CharacterType.ELASTIC)
+	_character_option.select(CharacterType.STRONG)
+	_character_option.add_theme_font_size_override("font_size", 15)
+	inner.add_child(_make_row("Class", _character_option))
+	_class_hint = _make_label("STRONG carries and throws. ELASTIC holds Q to stretch a rope tail.", 12, Color(0.55, 0.72, 0.84))
+	_class_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inner.add_child(_class_hint)
+
 	_address_field = _make_field("IP address", "127.0.0.1")
 	_port_field = SpinBox.new()
 	_port_field.min_value = 1
@@ -179,6 +193,7 @@ func _build_menu_panel() -> PanelContainer:
 
 	_host_button.pressed.connect(_on_host_pressed)
 	_join_button.pressed.connect(_on_join_pressed)
+	_character_option.item_selected.connect(_on_character_option_selected)
 	quit_button.pressed.connect(_on_quit_pressed)
 
 	if _is_web:
@@ -199,6 +214,9 @@ func _build_lobby_panel() -> PanelContainer:
 	top.add_theme_constant_override("separation", 12)
 	_host_tag = _make_label("HOST", 13, Color(0.35, 0.92, 0.72), true)
 	top.add_child(_host_tag)
+	_character_button = _make_button("CLASS: STRONG", "small")
+	_character_button.pressed.connect(_on_character_pressed)
+	top.add_child(_character_button)
 	var spacer_top := Control.new()
 	spacer_top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(spacer_top)
@@ -462,6 +480,8 @@ func _refresh_lobby() -> void:
 	_ready_button.self_modulate = Color(0.45, 1.0, 0.7) if local_ready else Color.WHITE
 	_start_button.visible = Net.is_host
 	_host_tag.text = "HOST" if Net.is_host else "CLIENT"
+	_character_button.text = "CLASS: " + CharacterType.label(Net.character_type)
+	_character_option.select(Net.character_type)
 
 	if Net.is_host:
 		if _is_web:
@@ -502,6 +522,10 @@ func _refresh_players() -> void:
 		var name_label := _make_label(who, 15, Color(0.93, 0.97, 1.0))
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_label)
+
+		var class_value := int(data.get("character_type", CharacterType.STRONG))
+		var class_color := Color(1.0, 0.74, 0.48) if class_value == CharacterType.STRONG else Color(0.55, 0.85, 1.0)
+		row.add_child(_make_label(CharacterType.label(class_value), 12, class_color, true))
 
 		var is_host_slot := id == 1
 		var is_ready := bool(data.get("ready", false))
@@ -554,6 +578,7 @@ func _on_host_pressed() -> void:
 	if display.is_empty():
 		display = DEFAULT_DISPLAY_NAME
 	_name_field.text = display
+	Net.set_character_type(_character_option.get_selected_id())
 	if _is_web:
 		var signal_url := _signal_field.text.strip_edges()
 		var room := _room_field.text.strip_edges().to_upper()
@@ -571,6 +596,7 @@ func _on_join_pressed() -> void:
 	if display.is_empty():
 		display = DEFAULT_DISPLAY_NAME
 	_name_field.text = display
+	Net.set_character_type(_character_option.get_selected_id())
 	if _is_web:
 		var signal_url := _signal_field.text.strip_edges()
 		var room := _room_field.text.strip_edges().to_upper()
@@ -588,6 +614,18 @@ func _on_join_pressed() -> void:
 
 func _on_quit_pressed() -> void:
 	get_tree().quit()
+
+
+func _on_character_option_selected(index: int) -> void:
+	Net.set_character_type(index)
+	_refresh_lobby()
+
+
+func _on_character_pressed() -> void:
+	var next_type := CharacterType.ELASTIC if Net.character_type == CharacterType.STRONG else CharacterType.STRONG
+	Net.set_character_type(next_type)
+	_character_option.select(next_type)
+	_refresh_lobby()
 
 
 func _on_chat_submitted(text: String) -> void:

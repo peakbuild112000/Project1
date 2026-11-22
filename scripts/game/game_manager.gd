@@ -16,6 +16,9 @@ const PHASE_ENDED := 2
 const RESPAWN_PENALTY := 5.0
 const FIX_REACH := 4.5
 const REVIVE_REACH := 4.6
+## A Strong climber launches an awake Elastic passenger with this extra arc.
+const STRONG_THROW_FORWARD := 14.0
+const STRONG_THROW_UP := 11.0
 
 @onready var world_environment: WorldEnvironment = $WorldEnvironment
 @onready var sun: DirectionalLight3D = $DirectionalLight3D
@@ -220,7 +223,10 @@ func _spawn_climber(data: Variant) -> Node:
 	if packed == null:
 		return null
 	var climber := packed.instantiate()
-	climber.call("configure", pid, str(info.get("name", "Climber %d" % pid)), color)
+	var character_value := int(info.get("character_type", CharacterType.STRONG))
+	if not CharacterType.is_valid(character_value):
+		character_value = CharacterType.STRONG
+	climber.call("configure", pid, str(info.get("name", "Climber %d" % pid)), color, character_value)
 	if climber.has_method("set_persistent_unconscious"):
 		climber.call("set_persistent_unconscious", _has_network())
 	climber.set("peer_id", pid)
@@ -420,6 +426,14 @@ func _find_climber_by_id(pid: int) -> Node:
 	return null
 
 
+func is_strong_climber(climber: Node) -> bool:
+	return climber != null and int(climber.get("character_type")) == CharacterType.STRONG
+
+
+func is_elastic_climber(climber: Node) -> bool:
+	return climber != null and int(climber.get("character_type")) == CharacterType.ELASTIC
+
+
 func _find_tail_by_owner(pid: int) -> Node:
 	for tail in get_tree().get_nodes_in_group("climb_tails"):
 		if int(tail.get("owner_peer_id")) == pid:
@@ -470,8 +484,13 @@ func _authorize_carry(carrier_pid: int, kind: int, target_id: String) -> void:
 		if target == null or target_pid == carrier_pid or bool(target.get("dead")):
 			_notify("CLIMBER UNAVAILABLE")
 			return
-		# Awake and unconscious climbers can both be carried. A teammate must
-		# press F to grab and F again (or the passenger) to drop.
+		# Any class can move a downed teammate. An awake climber can only be
+		# lifted by a Strong carrying an Elastic, which enables the high throw.
+		if not bool(target.get("unconscious")):
+			if int(carrier.get("character_type")) != CharacterType.STRONG or int(target.get("character_type")) != CharacterType.ELASTIC:
+				_notify("ONLY STRONG CAN CARRY AN AWAKE ELASTIC")
+				return
+		# A teammate must press F to grab and F again (or the passenger) to drop.
 		if int(target.get("carried_by_peer")) > 0:
 			_notify("CLIMBER ALREADY CARRIED")
 			return
@@ -483,6 +502,9 @@ func _authorize_carry(carrier_pid: int, kind: int, target_id: String) -> void:
 		var tail: Node = _find_tail_by_owner(owner_pid)
 		if owner == null or tail == null or owner_pid == carrier_pid:
 			_notify("TAIL UNAVAILABLE")
+			return
+		if tail.has_method("can_be_grappled") and not bool(tail.call("can_be_grappled")):
+			_notify("THAT CLIMBER HAS NO ROPE TAIL")
 			return
 		if int(tail.get("carrier_id")) != 0:
 			_notify("TAIL ALREADY CARRIED")
@@ -684,6 +706,29 @@ func _clear_carry_link(carrier_pid: int, broadcast: bool) -> void:
 		var target: Node = _find_climber_by_id(int(target_id))
 		if target != null and target.has_method("set_carried_by"):
 			target.call("set_carried_by", 0)
+			if (
+				carrier != null
+				and is_strong_climber(carrier)
+				and is_elastic_climber(target)
+				and not bool(target.get("unconscious"))
+				and target.has_method("launch_from_carry")
+			):
+				var throw_dir := Vector3.FORWARD
+				var camera: Camera3D = carrier.get_node_or_null("CameraPivot/Camera3D") as Camera3D
+				if camera != null:
+					throw_dir = -camera.global_transform.basis.z.normalized()
+				else:
+					throw_dir = -carrier.global_transform.basis.z.normalized()
+				throw_dir.y = 0.0
+				if throw_dir.length_squared() < 0.001:
+					throw_dir = Vector3.FORWARD
+				var velocity: Vector3 = (
+					carrier.linear_velocity
+					+ throw_dir.normalized() * STRONG_THROW_FORWARD
+					+ (Vector3.UP * STRONG_THROW_UP)
+				)
+				target.call("launch_from_carry", velocity)
+				_notify("ELASTIC LAUNCHED")
 	elif kind == 2:
 		var tail: Node = _find_tail_by_owner(int(target_id))
 		if tail != null and tail.has_method("set_carrier"):

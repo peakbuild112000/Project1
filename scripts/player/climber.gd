@@ -147,6 +147,8 @@ class ArmAnchor:
 @export var critical_lock_ratio: float = 0.45
 ## Seconds a downed climber survives without being carried or bandaged.
 @export var unconscious_death_time: float = 20.0
+## Holding the Elastic tail rope costs stamina while it is stretched.
+@export var tail_tension_drain: float = 7.0
 @export var jetpack_mass_kg: float = 12.0
 
 @export_group("Progress")
@@ -155,6 +157,7 @@ class ArmAnchor:
 
 var left_anchor: ArmAnchor = ArmAnchor.new()
 var right_anchor: ArmAnchor = ArmAnchor.new()
+var character_type: int = CharacterType.STRONG
 var carry_kind: int = -1
 var carry_target_id: String = ""
 var carried_by_peer: int = 0
@@ -253,12 +256,14 @@ func _exit_tree() -> void:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
-func configure(new_peer_id: int, new_display_name: String, new_color: Color) -> void:
+func configure(new_peer_id: int, new_display_name: String, new_color: Color, new_character_type: int = CharacterType.STRONG) -> void:
 	peer_id = maxi(1, new_peer_id)
 	display_name = new_display_name
 	player_color = new_color
+	character_type = new_character_type if CharacterType.is_valid(new_character_type) else CharacterType.STRONG
 	_configure_synchronizer()
 	_apply_color()
+	_apply_character_type()
 	if is_node_ready():
 		_apply_authority_mode()
 		_refresh_visuals()
@@ -272,6 +277,7 @@ func get_state() -> Dictionary:
 		"peer_id": peer_id,
 		"display_name": display_name,
 		"player_color": player_color,
+		"character_type": character_type,
 		"position": global_position,
 		"velocity": linear_velocity,
 		"stamina": current_stamina,
@@ -557,6 +563,7 @@ func _configure_synchronizer() -> void:
 		"jetpack_fuel",
 		"display_name",
 		"player_color",
+		"character_type",
 		"highest_y",
 		"checkpoint_y",
 	]
@@ -621,7 +628,7 @@ func _apply_color() -> void:
 	if _right_foot != null:
 		_right_foot.material_override = _make_material(player_color.darkened(0.25), 0.4)
 	if _tail_body != null and _tail_body.has_method("setup"):
-		_tail_body.call("setup", peer_id, player_color)
+		_tail_body.call("setup", peer_id, player_color, is_elastic())
 	if ragdoll_rig != null and ragdoll_rig.has_method("apply_color"):
 		ragdoll_rig.call("apply_color", player_color)
 
@@ -641,7 +648,7 @@ func _refresh_visuals() -> void:
 	if _right_foot != null:
 		_right_foot.visible = not hidden
 	if _tail_body != null:
-		_tail_body.visible = not hidden
+		_tail_body.visible = not hidden and is_elastic()
 	if jetpack_visual != null:
 		jetpack_visual.visible = not hidden and has_jetpack
 	if _jetpack_flame != null:
@@ -1121,7 +1128,7 @@ func _request_carry() -> void:
 				kind = 0
 				target_id = str(collider.get("prop_id"))
 				best_distance = distance
-			elif collider.has_method("get_state") and int(collider.get("peer_id")) != peer_id and not bool(collider.get("dead")):
+			elif collider.has_method("get_state") and can_carry_climber(collider):
 				kind = 1
 				target_id = str(int(collider.get("peer_id")))
 				best_distance = distance
@@ -1130,6 +1137,8 @@ func _request_carry() -> void:
 		for tail in get_tree().get_nodes_in_group("climb_tails"):
 			var owner_id := int(tail.get("owner_peer_id"))
 			if owner_id == peer_id or int(tail.get("carrier_id")) != 0:
+				continue
+			if tail.has_method("can_be_grappled") and not bool(tail.call("can_be_grappled")):
 				continue
 			var tail_distance := global_position.distance_to(tail.global_position)
 			if tail_distance < carry_reach and tail_distance < best_distance:
@@ -1146,9 +1155,7 @@ func _request_carry() -> void:
 				target_id = str(prop.get("prop_id"))
 				best_distance = distance
 	for climber in get_tree().get_nodes_in_group("climbers"):
-		if int(climber.get("peer_id")) == peer_id or bool(climber.get("dead")):
-			continue
-		if int(climber.get("carried_by_peer")) > 0:
+		if int(climber.get("carried_by_peer")) > 0 or not can_carry_climber(climber):
 			continue
 		var distance := global_position.distance_to(climber.global_position)
 		if distance < carry_reach and distance < best_distance:
@@ -1331,6 +1338,11 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("drop_jetpack"):
 		remove_jetpack()
 
+	if is_elastic():
+		_update_tail_tension(delta)
+	elif is_instance_valid(_tail_body) and _tail_body.has_method("set_tension"):
+		_tail_body.call("set_tension", false, Vector3.FORWARD, 0.0)
+
 	if carried_by_peer > 0:
 		_process_carried(delta)
 	elif ragdoll_active:
@@ -1503,6 +1515,78 @@ func _ray_exclusions() -> Array[RID]:
 
 func _hands_full_with_bucket() -> bool:
 	return carry_kind == 0 and is_instance_valid(_carry_node) and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET
+
+
+func is_strong() -> bool:
+	return character_type == CharacterType.STRONG
+
+
+func is_elastic() -> bool:
+	return character_type == CharacterType.ELASTIC
+
+
+func can_carry_climber(target: Node) -> bool:
+	if target == null or int(target.get("peer_id")) == peer_id or bool(target.get("dead")):
+		return false
+	if bool(target.get("unconscious")):
+		return true
+	return is_strong() and int(target.get("character_type")) == CharacterType.ELASTIC
+
+
+func set_character_type(value: int) -> void:
+	if not CharacterType.is_valid(value) or character_type == value:
+		return
+	character_type = value
+	_apply_color()
+	_apply_character_type()
+	_refresh_visuals()
+
+
+func _apply_character_type() -> void:
+	if body_mesh == null:
+		return
+	# Visual silhouette only: collision and mass stay identical for fairness.
+	body_mesh.scale = Vector3(1.18, 1.0, 1.18) if is_strong() else Vector3(0.92, 1.05, 0.92)
+	if _tail_body != null and _tail_body.has_method("setup"):
+		_tail_body.call("setup", peer_id, player_color, is_elastic())
+
+
+## The host applies this after releasing a Strong carrier's Elastic passenger.
+func launch_from_carry(velocity: Vector3) -> void:
+	if dead:
+		return
+	if ragdoll_active and not persistent_unconscious:
+		recover()
+	control_disabled = false
+	linear_velocity = velocity
+	_reset_fall_state()
+
+
+func _update_tail_tension(delta: float) -> void:
+	if _tail_body == null or not _tail_body.has_method("set_tension"):
+		return
+	var usable: bool = (
+		is_elastic()
+		and not ragdoll_active
+		and not dead
+		and carried_by_peer <= 0
+		and carry_kind != 2
+		and not _hands_full_with_bucket()
+		and current_stamina > 1.0
+		and Input.is_action_pressed("tail_stretch")
+	)
+	if not usable:
+		_tail_body.call("set_tension", false, Vector3.FORWARD, 0.0)
+		return
+	var camera: Camera3D = _get_camera()
+	if camera == null:
+		return
+	var direction: Vector3 = -camera.global_transform.basis.z.normalized()
+	if direction.length_squared() < 0.001:
+		direction = -global_transform.basis.z.normalized()
+	var max_length: float = float(_tail_body.get("max_tension_length"))
+	set_current_stamina(current_stamina - tail_tension_drain * delta)
+	_tail_body.call("set_tension", true, direction, max_length)
 
 
 func _handle_arm_input() -> void:

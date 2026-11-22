@@ -19,8 +19,8 @@ func _initialize() -> void:
 	net.set("peer_id", 1)
 	net.set("is_host", true)
 	var roster: Dictionary[int, Dictionary] = {}
-	roster[1] = {"name": "Host", "color": Color(0.3, 0.8, 1.0), "ready": true}
-	roster[2] = {"name": "Guest", "color": Color(1.0, 0.5, 0.3), "ready": true}
+	roster[1] = {"name": "Host", "color": Color(0.3, 0.8, 1.0), "ready": true, "character_type": CharacterType.STRONG}
+	roster[2] = {"name": "Guest", "color": Color(1.0, 0.5, 0.3), "ready": true, "character_type": CharacterType.ELASTIC}
 	net.set("players", roster)
 
 	var packed := load("res://scenes/game.tscn") as PackedScene
@@ -39,6 +39,23 @@ func _initialize() -> void:
 	var climber2 := players_root.get_node_or_null("Climber_2")
 	check(climber1 != null, "Climber_1 missing")
 	check(climber2 != null, "Climber_2 missing")
+
+	# Two classes: Strong carries/throws, Elastic owns a rope tail.
+	if climber1 != null and climber2 != null:
+		check(int(climber1.get("character_type")) == CharacterType.STRONG, "Host is not Strong")
+		check(int(climber2.get("character_type")) == CharacterType.ELASTIC, "Guest is not Elastic")
+		var state1: Dictionary = climber1.call("get_state")
+		var state2: Dictionary = climber2.call("get_state")
+		check(int(state1.get("character_type", -1)) == CharacterType.STRONG, "Strong type not replicated in state")
+		check(int(state2.get("character_type", -1)) == CharacterType.ELASTIC, "Elastic type not replicated in state")
+		var tail1: Node = climber1.find_child("Tail", true, false)
+		var tail2: Node = climber2.find_child("Tail", true, false)
+		check(tail1 != null, "Strong climber missing tail node")
+		check(tail2 != null, "Elastic climber missing tail node")
+		if tail1 != null:
+			check(not bool(tail1.call("can_be_grappled")), "Strong tail is grappleable")
+		if tail2 != null:
+			check(bool(tail2.call("can_be_grappled")), "Elastic tail is not grappleable")
 
 	check(int(game.get("_phase")) == 0, "Expected countdown phase")
 	var guard := 0
@@ -147,15 +164,26 @@ func _initialize() -> void:
 		await process_frame
 		check(bool(climber1.get("has_jetpack")), "Jetpack not equipped")
 
-		# Teammates can be carried whether awake or ragdolling.
+		# An awake Elastic can be carried by a Strong, then thrown higher.
 		game.call("request_carry", 1, "2")
 		await process_frame
-		check(int(climber1.get("carry_kind")) == 1, "Awake climber was not grabbed")
-		check(int(climber2.get("carried_by_peer")) == 1, "Carried climber was not linked")
+		check(int(climber1.get("carry_kind")) == 1, "Awake Elastic was not grabbed")
+		check(int(climber2.get("carried_by_peer")) == 1, "Carried Elastic was not linked")
+		var throw_ready: bool = climber2.has_method("launch_from_carry")
+		check(throw_ready, "Elastic passenger has no launch_from_carry API")
 		game.call("request_drop")
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Carried climber was not dropped")
 		check(int(climber2.get("carried_by_peer")) == 0, "Carried link was not cleared")
+		check(climber2.linear_velocity.y > 5.0, "Thrown Elastic did not receive an upward launch")
+
+		# A Strong cannot carry another awake Strong.
+		climber2.call("set_character_type", CharacterType.STRONG)
+		game.call("request_carry", 1, "2")
+		await process_frame
+		check(int(climber1.get("carry_kind")) == -1, "Strong illegally carried an awake Strong")
+		check(int(climber2.get("carried_by_peer")) == 0, "Awake Strong was illegally linked")
+		climber2.call("set_character_type", CharacterType.ELASTIC)
 
 		# Fall damage stays as a red locked slice until a bandage is used.
 		check(int(climber1.get("bandages")) == 0, "Climbers must start with no bandages")
