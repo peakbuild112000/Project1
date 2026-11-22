@@ -69,9 +69,11 @@ on UDP port `7777`.
   awake climber can only be lifted by a Strong carrying an Elastic.
 - The **Elastic** climber owns a rope tail. Hold `Q` to stretch it into a long
   grappling line toward the camera; a Strong teammate can hook that line with a
-  hand and climb it. The Elastic pays stamina while the rope is stretched. The
-  tail can also be grabbed with `F`, carried and thrown; it flies briefly and
-  then returns to its owner. Strong climbers have no usable rope tail.
+  hand and climb it. The Elastic pays stamina while the rope is stretched, and
+  the rope stops at the first wall instead of passing through it. The tail can
+  also be grabbed with `F`, carried and thrown; it collides with the world and
+  flies briefly before returning to its owner. Strong climbers have no usable
+  rope tail.
 - A downed teammate has a death countdown, which pauses while carried, but they
   stay down until someone spends a bandage on them. Feet are animated, and
   walking and jumping work even when both hands are occupied. The bucket is held
@@ -109,6 +111,9 @@ The main menu opens first.
   **START MATCH** directly.
 - LAN works out of the box. Online play needs port forwarding or a tunnel for
   UDP port `7777`, or any port selected in the menu.
+- The match needs both classes at the table: at least one **Strong** and one
+  **Elastic**. If everyone picked the same class, START MATCH stays disabled and
+  the host is told why.
 
 ## Controls
 

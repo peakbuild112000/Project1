@@ -302,6 +302,7 @@ func _connect_net_signals() -> void:
 	Net.hosted.connect(_on_hosted)
 	Net.lobby_changed.connect(_on_lobby_changed)
 	Net.match_started.connect(_on_match_started)
+	Net.match_start_rejected.connect(_on_match_start_rejected)
 	Net.disconnected.connect(_on_disconnected)
 	Net.chat_message.connect(_on_chat_message)
 
@@ -483,13 +484,20 @@ func _refresh_lobby() -> void:
 	_character_button.text = "CLASS: " + CharacterType.label(Net.character_type)
 	_character_option.select(Net.character_type)
 
+	_start_button.disabled = not Net.has_both_classes()
 	if Net.is_host:
 		if _is_web:
 			_lobby_status.text = "Room %s  -  %d/%d players" % [Net.web_room, Net.players.size(), Net.max_players]
 		else:
 			_lobby_status.text = "Port %d  -  %d/%d players" % [Net.port, Net.players.size(), Net.max_players]
+		if _start_button.disabled:
+			_lobby_status.text += "  -  NEED 1 STRONG + 1 ELASTIC"
+			_lobby_status.add_theme_color_override("font_color", Color(1.0, 0.62, 0.5))
+		else:
+			_lobby_status.remove_theme_color_override("font_color")
 	else:
 		_lobby_status.text = "Waiting for host to start…"
+		_lobby_status.remove_theme_color_override("font_color")
 
 	_refresh_players()
 
@@ -689,6 +697,11 @@ func _on_match_started() -> void:
 	_lobby_status.text = "Starting match..."
 	_start_button.disabled = true
 	_ready_button.disabled = true
+
+
+func _on_match_start_rejected(reason: String) -> void:
+	_lobby_status.text = "CANNOT START: " + reason
+	_lobby_status.add_theme_color_override("font_color", Color(1.0, 0.55, 0.48))
 
 
 func _on_disconnected() -> void:

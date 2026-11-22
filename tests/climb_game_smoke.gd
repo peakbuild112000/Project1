@@ -56,6 +56,24 @@ func _initialize() -> void:
 			check(not bool(tail1.call("can_be_grappled")), "Strong tail is grappleable")
 		if tail2 != null:
 			check(bool(tail2.call("can_be_grappled")), "Elastic tail is not grappleable")
+			# The stretched rope must stop at the first wall instead of going
+			# through it. A temporary world-body wall four metres ahead is enough.
+			var wall := StaticBody3D.new()
+			var shape := BoxShape3D.new()
+			shape.size = Vector3(8.0, 8.0, 1.0)
+			var collider := CollisionShape3D.new()
+			collider.shape = shape
+			wall.add_child(collider)
+			wall.collision_layer = 1
+			wall.collision_mask = 1
+			game.add_child(wall)
+			wall.global_position = climber2.global_position + Vector3(0.0, 0.0, -4.0)
+			await physics_frame
+			tail2.call("set_tension", true, Vector3.FORWARD, 13.0)
+			var clamped: float = float(tail2.get("tension_length"))
+			check(clamped > 0.0 and clamped < 5.0, "Rope crossed the wall (length=%.2f)" % clamped)
+			tail2.call("set_tension", false, Vector3.FORWARD, 0.0)
+			wall.queue_free()
 
 	check(int(game.get("_phase")) == 0, "Expected countdown phase")
 	var guard := 0
@@ -171,11 +189,14 @@ func _initialize() -> void:
 		check(int(climber2.get("carried_by_peer")) == 1, "Carried Elastic was not linked")
 		var throw_ready: bool = climber2.has_method("launch_from_carry")
 		check(throw_ready, "Elastic passenger has no launch_from_carry API")
+		# A falling carrier would legitimately subtract from the throw arc.
+		climber1.linear_velocity = Vector3.ZERO
 		game.call("request_drop")
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Carried climber was not dropped")
 		check(int(climber2.get("carried_by_peer")) == 0, "Carried link was not cleared")
-		check(climber2.linear_velocity.y > 5.0, "Thrown Elastic did not receive an upward launch")
+		var launch_velocity: Vector3 = climber2.get("last_launch_velocity")
+		check(launch_velocity.y > 5.0, "Thrown Elastic did not receive an upward launch")
 
 		# A Strong cannot carry another awake Strong.
 		climber2.call("set_character_type", CharacterType.STRONG)

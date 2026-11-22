@@ -536,3 +536,61 @@ which stretches a kinematic rope body toward the camera and replicates through
 rope is out. The full validation and gameplay smoke suites were extended to
 check type APIs, gating, the throw impulse and tail gating, and they pass with
 `RESULT PASSED`.
+
+## 26. Rope tail crossed walls and same-class lobbies could start
+
+**Symptom**
+
+The Elastic rope stretched straight through walls and the mountain. A thrown
+tail also flew through solid rock. Separately, a lobby where every player had
+picked the same class could still start a match, even though neither signature
+move works without both Strong and Elastic.
+
+**Cause**
+
+The tensioned rope is a frozen kinematic body whose `global_transform` is
+written directly each frame, so Godot never ran a collision query for it. The
+released tail was on collision layer 4 with mask 1, while world bodies are on
+layer 1 with mask 1; Godot requires both directions to match, so no contact was
+registered. `start_match()` had no roster validation at all.
+
+**Fix**
+
+`TailRope._clamp_length_to_walls()` raycasts from the owner origin along the
+tension direction against layer 1, excludes the owner and the rope itself, and
+shortens the rope to the first hit minus `WALL_MARGIN`. The clamped length is
+then replicated, so every peer draws the same stopped rope. On release the tail
+temporarily joins layer 1 with mask 1 so it physically bounces off the world,
+and `_reset_to_owner()` restores layer 4 / mask 0.
+
+`Net.has_both_classes()` now checks the roster for at least one Strong and one
+Elastic. `start_match()` rejects smaller or single-class lobbies through the
+new `match_start_rejected(reason)` signal, and the menu disables START MATCH
+with a clear requirement message. Validation checks both the class gate and the
+wall clamp; the two-process ENet harness confirms that a solo start is rejected
+and that the match starts once the Elastic guest registers.
+
+## 27. Thrown Elastic lost its launch velocity on frozen remote bodies
+
+**Symptom**
+
+The smoke test sometimes reported a zero upward velocity after a Strong threw
+an awake Elastic, even though the host computed the correct impulse.
+
+**Cause**
+
+The passenger is a remote `RigidBody3D` frozen in kinematic mode. Writing
+`linear_velocity` on that body is not enough: the physics step can discard it,
+and in a real match the host does not simulate the passenger at all — only the
+owner peer does. The impulse was never replicated.
+
+**Fix**
+
+`GameManager._clear_carry_link()` now calls
+`target.rpc("rpc_carry_launch", velocity)` in addition to the local call.
+`Climber.rpc_carry_launch()` accepts only the server as sender and calls
+`launch_from_carry()` on the owner peer, where the body is live and the velocity
+really moves it. `last_launch_velocity` stores the applied value so validation
+is independent of frozen-body physics timing. The throw vector also flattens
+camera pitch, and the smoke test zeroes a falling carrier before releasing so
+the expected arc is deterministic.

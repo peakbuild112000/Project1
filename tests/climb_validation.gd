@@ -41,8 +41,20 @@ func _initialize() -> void:
 	check(net != null, "Net autoload missing")
 	if net != null:
 		check(not net.has_method("start_solo"), "Solo match entry point must be removed")
-		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "set_character_type"]:
+		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "set_character_type", "has_both_classes"]:
 			check(net.has_method(method), "Net missing method: " + method)
+		check(net.has_signal("match_start_rejected"), "Net missing match_start_rejected signal")
+		# A lobby where everyone picked the same class cannot start a match.
+		var saved_players: Dictionary = net.get("players")
+		var same_class: Dictionary[int, Dictionary] = {}
+		same_class[1] = {"character_type": CharacterType.STRONG}
+		same_class[2] = {"character_type": CharacterType.STRONG}
+		net.set("players", same_class)
+		check(not bool(net.call("has_both_classes")), "Same-class lobby was accepted")
+		same_class[2] = {"character_type": CharacterType.ELASTIC}
+		net.set("players", same_class)
+		check(bool(net.call("has_both_classes")), "Mixed-class lobby was rejected")
+		net.set("players", saved_players)
 		var rtc := net.get_node_or_null("WebRTCRoom")
 		check(rtc != null, "Net missing WebRTCRoom transport")
 		if rtc != null:
@@ -53,7 +65,7 @@ func _initialize() -> void:
 	if climber_scene != null:
 		var climber := climber_scene.instantiate() as Node
 		root.add_child(climber)
-		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry"]:
+		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry", "rpc_carry_launch"]:
 			check(climber.has_method(method), "Climber missing method: " + method)
 		for prop in ["peer_id", "display_name", "player_color", "character_type", "current_stamina", "max_stamina", "stamina_lock", "stretch", "ragdoll_active", "unconscious", "persistent_unconscious", "unconscious_time", "death_progress", "fall_time", "highest_y", "checkpoint_y", "is_local", "injury", "bandages"]:
 			check(climber.get(prop) != null or climber.get_property_list().any(func(p): return p.name == prop), "Climber missing property: " + prop)

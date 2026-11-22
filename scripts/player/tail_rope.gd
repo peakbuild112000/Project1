@@ -8,6 +8,10 @@ class_name TailRope
 ## hidden tail so every climber keeps the same scene shape.
 
 const TENSION_SEND_INTERVAL := 0.05
+## World geometry lives on layer 1. The stretched rope must stop at that layer
+## instead of passing through walls and the mountain.
+const WALL_LAYER_MASK: int = 1
+const WALL_MARGIN: float = 0.18
 
 @export var prop_id: String = "tail_0"
 @export var owner_peer_id: int = 0
@@ -77,6 +81,7 @@ func set_tension(active: bool, direction: Vector3 = Vector3.FORWARD, length: flo
 		if direction.length_squared() > 0.001:
 			next_direction = direction.normalized()
 		next_length = clampf(length, 0.05, max_tension_length)
+		next_length = _clamp_length_to_walls(next_direction, next_length)
 	var changed: bool = active != tensioned
 	_apply_tension(active, next_direction, next_length)
 	if changed:
@@ -93,6 +98,29 @@ func rpc_apply_tension(active: bool, direction: Vector3, length: float) -> void:
 	if not elastic:
 		return
 	_apply_tension(active, direction, length)
+
+
+## A kinematic rope can be placed anywhere, so the owner raycasts along the
+## tension direction every frame and shortens the rope at the first wall hit.
+## Remote peers receive the already clamped length through the tension RPC.
+func _clamp_length_to_walls(direction: Vector3, length: float) -> float:
+	if length <= 0.0:
+		return 0.0
+	var world := get_world_3d()
+	if world == null:
+		return length
+	var origin := _owner_origin()
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * length, WALL_LAYER_MASK, [])
+	var exclusions: Array[RID] = [get_rid()]
+	var owner_node := get_parent()
+	if owner_node is Node3D:
+		exclusions.append((owner_node as Node3D).get_rid())
+	query.exclude = exclusions
+	var hit := world.direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return length
+	var hit_position: Vector3 = hit.get("position", origin + direction * length)
+	return clampf(origin.distance_to(hit_position) - WALL_MARGIN, 0.0, length)
 
 
 func _apply_tension(active: bool, direction: Vector3, length: float) -> void:
@@ -118,10 +146,14 @@ func set_carrier(peer_id: int, throw_velocity: Vector3 = Vector3.ZERO) -> void:
 		linear_velocity = Vector3.ZERO
 		angular_velocity = Vector3.ZERO
 		return
-	# Released: the tail is a light, tumbling rope for a short moment.
+	# Released: the tail is a light, tumbling rope for a short moment. World
+	# bodies are on layer 1 with mask 1, so the rope must share that layer for
+	# Godot to register the contact in both directions; otherwise it flies
+	# straight through walls and the mountain.
 	top_level = true
 	freeze = false
 	gravity_scale = 1.0
+	collision_layer = 1
 	collision_mask = 1
 	linear_velocity = throw_velocity
 	angular_velocity = Vector3(sin(float(prop_id.length())), 1.4, cos(float(prop_id.length()))) * 3.0

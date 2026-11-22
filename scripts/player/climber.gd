@@ -158,6 +158,9 @@ class ArmAnchor:
 var left_anchor: ArmAnchor = ArmAnchor.new()
 var right_anchor: ArmAnchor = ArmAnchor.new()
 var character_type: int = CharacterType.STRONG
+## Kept so the host can verify a thrown passenger was actually launched even
+## when its frozen remote body ignores linear_velocity until the owner applies it.
+var last_launch_velocity: Vector3 = Vector3.ZERO
 var carry_kind: int = -1
 var carry_target_id: String = ""
 var carried_by_peer: int = 0
@@ -1558,8 +1561,18 @@ func launch_from_carry(velocity: Vector3) -> void:
 	if ragdoll_active and not persistent_unconscious:
 		recover()
 	control_disabled = false
+	last_launch_velocity = velocity
 	linear_velocity = velocity
 	_reset_fall_state()
+
+
+## The host owns carry links but not the passenger body. The owner peer is the
+## one that actually simulates the climb, so the launch must be sent to it.
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_carry_launch(velocity: Vector3) -> void:
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	launch_from_carry(velocity)
 
 
 func _update_tail_tension(delta: float) -> void:

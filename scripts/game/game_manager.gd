@@ -728,6 +728,8 @@ func _clear_carry_link(carrier_pid: int, broadcast: bool) -> void:
 					+ (Vector3.UP * STRONG_THROW_UP)
 				)
 				target.call("launch_from_carry", velocity)
+				if _has_network() and _is_authority():
+					target.rpc("rpc_carry_launch", velocity)
 				_notify("ELASTIC LAUNCHED")
 	elif kind == 2:
 		var tail: Node = _find_tail_by_owner(int(target_id))

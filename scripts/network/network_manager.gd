@@ -11,6 +11,7 @@ signal lobby_changed()
 signal match_started()
 signal disconnected()
 signal chat_message(peer_id: int, message: String)
+signal match_start_rejected(reason: String)
 
 const DEFAULT_PORT := 7777
 const DEFAULT_NAME := "Climber"
@@ -141,8 +142,28 @@ func join_web_room(p_player_name: String, p_signal_url: String, p_room: String) 
 	_web_rtc.call("start_client", p_signal_url, web_room)
 
 
+## The duo needs both classes: only Strong can throw an awake Elastic, and only
+## Elastic can grow the rope a Strong climbs. A same-class lobby cannot play.
+func has_both_classes() -> bool:
+	var has_strong := false
+	var has_elastic := false
+	for id in players:
+		var value := int((players[id] as Dictionary).get("character_type", CharacterType.STRONG))
+		if value == CharacterType.STRONG:
+			has_strong = true
+		elif value == CharacterType.ELASTIC:
+			has_elastic = true
+	return has_strong and has_elastic
+
+
 func start_match() -> void:
 	if not is_host or not multiplayer.is_server() or _match_starting:
+		return
+	if players.size() < 2:
+		match_start_rejected.emit("Need at least one Strong and one Elastic climber.")
+		return
+	if not has_both_classes():
+		match_start_rejected.emit("Both classes are required: one Strong and one Elastic.")
 		return
 	_match_starting = true
 	match_seed = 20261121 + (Time.get_ticks_msec() % 100000)
