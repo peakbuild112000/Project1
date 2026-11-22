@@ -1,0 +1,184 @@
+[gd_scene load_steps=14 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/climber.gd" id="1_climber"]
+[ext_resource type="Script" path="res://scripts/player/player_camera.gd" id="2_camera"]
+[ext_resource type="Script" path="res://scripts/player/arm_mesh.gd" id="3_arm"]
+[ext_resource type="Script" path="res://scripts/player/ragdoll_rig.gd" id="4_ragdoll"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.4
+height = 0.9
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.4
+height = 1.7
+radial_segments = 12
+rings = 8
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.28
+height = 0.56
+radial_segments = 12
+rings = 8
+
+[sub_resource type="SphereMesh" id="SphereMesh_hand"]
+radius = 0.12
+height = 0.24
+radial_segments = 10
+rings = 6
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_limb"]
+radius = 0.12
+height = 0.5
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_head"]
+radius = 0.24
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hips"]
+size = Vector3(0.6, 0.36, 0.32)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_limb"]
+radius = 0.12
+height = 0.62
+radial_segments = 8
+rings = 5
+
+[sub_resource type="BoxMesh" id="BoxMesh_hips"]
+size = Vector3(0.6, 0.36, 0.32)
+
+[node name="Climber" type="RigidBody3D" node_paths=PackedStringArray("camera_pivot", "left_arm", "right_arm", "ragdoll_rig", "body_mesh", "head_mesh")]
+mass = 80.0
+center_of_mass_mode = 1
+center_of_mass = Vector3(0, 0.12, 0)
+collision_layer = 2
+collision_mask = 5
+script = ExtResource("1_climber")
+camera_pivot = NodePath("CameraPivot")
+left_arm = NodePath("LeftArm")
+right_arm = NodePath("RightArm")
+ragdoll_rig = NodePath("RagdollRig")
+body_mesh = NodePath("Body")
+head_mesh = NodePath("Head")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("CapsuleMesh_body")
+
+[node name="Head" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.02, 0)
+mesh = SubResource("SphereMesh_head")
+
+[node name="JetpackVisual" type="Node3D" parent="."]
+
+[node name="CameraPivot" type="Node3D" parent="."]
+script = ExtResource("2_camera")
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot"]
+
+[node name="LeftArm" type="MeshInstance3D" parent="." node_paths=PackedStringArray("hand_marker")]
+script = ExtResource("3_arm")
+hand_marker = NodePath("HandMarker")
+
+[node name="HandMarker" type="MeshInstance3D" parent="LeftArm"]
+visible = false
+mesh = SubResource("SphereMesh_hand")
+
+[node name="RightArm" type="MeshInstance3D" parent="." node_paths=PackedStringArray("hand_marker")]
+script = ExtResource("3_arm")
+hand_marker = NodePath("HandMarker")
+
+[node name="HandMarker" type="MeshInstance3D" parent="RightArm"]
+visible = false
+mesh = SubResource("SphereMesh_hand")
+
+[node name="RagdollRig" type="Node3D" parent="."]
+top_level = true
+visible = false
+script = ExtResource("4_ragdoll")
+
+[node name="Hips" type="RigidBody3D" parent="RagdollRig"]
+mass = 5.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/Hips"]
+shape = SubResource("BoxShape3D_hips")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/Hips"]
+mesh = SubResource("BoxMesh_hips")
+
+[node name="Torso" type="RigidBody3D" parent="RagdollRig"]
+mass = 9.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/Torso"]
+shape = SubResource("CapsuleShape3D_limb")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/Torso"]
+transform = Transform3D(1.1, 0, 0, 0, 1.5, 0, 0, 0, 1.1, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_limb")
+
+[node name="Head" type="RigidBody3D" parent="RagdollRig"]
+mass = 3.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/Head"]
+shape = SubResource("SphereShape3D_head")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/Head"]
+mesh = SubResource("SphereMesh_head")
+
+[node name="ArmL" type="RigidBody3D" parent="RagdollRig"]
+mass = 2.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/ArmL"]
+shape = SubResource("CapsuleShape3D_limb")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/ArmL"]
+transform = Transform3D(0.8, 0, 0, 0, 1.1, 0, 0, 0, 0.8, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_limb")
+
+[node name="ArmR" type="RigidBody3D" parent="RagdollRig"]
+mass = 2.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/ArmR"]
+shape = SubResource("CapsuleShape3D_limb")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/ArmR"]
+transform = Transform3D(0.8, 0, 0, 0, 1.1, 0, 0, 0, 0.8, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_limb")
+
+[node name="LegL" type="RigidBody3D" parent="RagdollRig"]
+mass = 4.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/LegL"]
+shape = SubResource("CapsuleShape3D_limb")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/LegL"]
+transform = Transform3D(0.9, 0, 0, 0, 1.25, 0, 0, 0, 0.9, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_limb")
+
+[node name="LegR" type="RigidBody3D" parent="RagdollRig"]
+mass = 4.0
+collision_layer = 1
+collision_mask = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RagdollRig/LegR"]
+shape = SubResource("CapsuleShape3D_limb")
+
+[node name="Mesh" type="MeshInstance3D" parent="RagdollRig/LegR"]
+transform = Transform3D(0.9, 0, 0, 0, 1.25, 0, 0, 0, 0.9, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_limb")
+
+[node name="StateSync" type="MultiplayerSynchronizer" parent="."]
+replication_interval = 0.05
