@@ -162,12 +162,13 @@ func _add_hazard(pos: Vector3, size: Vector3, kind: int, hazard_label: String) -
 
 func _build_base() -> void:
 	_add_box(Vector3(0, -0.5, MOUNTAIN_CENTER_Z), Vector3(52, 3, 52), _base_material)
-	# Flat race pad at the natural foot of the mountain. The terrain keeps its
-	# gentle base slope in front, so there is no artificial cliff to enter.
-	_add_box(Vector3(0, 2.0, -2.0), Vector3(16, 0.4, 4.0), _accent_material)
-	var x_positions: Array[float] = [-4.5, -1.5, 1.5, 4.5]
+	# Small flat pad at the very bottom and horizontal centre of the mountain.
+	# The four slots are clustered around x = 0 so everybody starts in the middle.
+	var pad := _add_box(Vector3(0, 2.0, -1.0), Vector3(8.0, 0.4, 3.0), _accent_material)
+	pad.name = "StartPad"
+	var x_positions: Array[float] = [-1.5, -0.5, 0.5, 1.5]
 	for x in x_positions:
-		spawn_points.append(Vector3(x, 3.05, -2.0))
+		spawn_points.append(Vector3(x, 3.05, -1.0))
 
 
 func _build_start_holds() -> void:

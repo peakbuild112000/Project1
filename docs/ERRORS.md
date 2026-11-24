@@ -853,9 +853,9 @@ with no grips, so the route was physically unreachable.
 
 **Fix**
 
-The pad returned to the natural foot of the mountain at `z = -2`, raised to
-`y = 2.0` so its top is `2.2` and racers spawn at `y = 3.05`. Its depth was
-reduced to 4 m. The flatten band now only covers the pocket under the pad
+The pad returned to the natural foot of the mountain, raised to `y = 2.0` so
+its top is `2.2` and racers spawn at `y = 3.05`. Its depth was reduced and it
+was later centred at `z = -1` (section 40). The flatten band now only covers the pocket under the pad
 (`z = -4..0`) and releases by `z = 2`, so heights rise continuously:
 1 m at `z = 0`, 12.6 m at `z = 2`, 22.9 m at `z = 4`. Validation now rejects
 any height jump over 20 m between consecutive 2 m samples in the entrance. The
@@ -894,3 +894,23 @@ Both ENet and WebRTC clients now call `_register_name_with_host()`. The host
 preserves an existing name when `peer_connected` arrives late and broadcasts the
 corrected roster, so the lobby, leaderboard and climbers all use the chosen
 display name.
+
+## 40. Spawns were spread across the whole foot instead of the middle
+
+**Symptom**
+
+The four racers still started far apart on the bottom edge of the mountain
+instead of together at its horizontal centre.
+
+**Cause**
+
+The start pad was 16 m wide with slots at `x = ±4.5, ±1.5`, so two racers began
+near the side silhouette rather than in the middle of the route.
+
+**Fix**
+
+The pad is now 8 m wide, named `StartPad`, centred at `(0, 2.0, -1)` at the very
+bottom of the mountain. The four slots are `x = -1.5, -0.5, 0.5, 1.5`,
+`y = 3.05`, `z = -1`, all inside the footprint and grouped around `x = 0`.
+Validation checks the centred `x` and bottom `z` for every slot and excludes
+`StartPad` from the entrance-wall scan.

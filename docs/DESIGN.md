@@ -186,9 +186,10 @@ player count only.
 - Deterministic seeded mountain: the host chooses one seed and sends it with the
   start RPC so every peer builds the same heightfield, concave collider, ledges,
   overhangs, hazards, checkpoints, summit, props and pickups.
-- `_build_base()` creates a flat start pad at `(0, 2.0, -2)` at the natural foot
-  of the mountain and four spawn points at `x = -4.5, -1.5, 1.5, 4.5`,
-  `y = 3.05`, `z = -2`. `_height_at()` flattens only the pocket under the pad and
+- `_build_base()` creates a small flat start pad named `StartPad` at
+  `(0, 2.0, -1)` at the very bottom and horizontal centre of the mountain, with
+  four tightly clustered spawn points at `x = -1.5, -0.5, 0.5, 1.5`, `y = 3.05`,
+  `z = -1`. `_height_at()` flattens only the pocket under the pad and
   lets the natural base slope resume immediately, so there is no artificial
   cliff at the entrance. `_entrance_z_for_height()` places thirteen guaranteed
   grips, spaced 2.5 m in altitude and alternating around `x = ±1.3`, so the

@@ -88,7 +88,8 @@ func _initialize() -> void:
 	for slot in range(4):
 		var spawn: Vector3 = level_node.call("get_spawn_point", slot)
 		check(absf(spawn.y - 3.05) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
-		check(absf(spawn.z + 2.0) <= 0.01, "Spawn slot %d sits outside the mountain footprint" % slot)
+		check(absf(spawn.z + 1.0) <= 0.01, "Spawn slot %d is not at the bottom of the mountain" % slot)
+		check(absf(spawn.x) <= 1.5, "Spawn slot %d is not centred on the mountain" % slot)
 		check(sqrt(spawn.x * spawn.x + (spawn.z - 16.0) * (spawn.z - 16.0)) < 19.0, "Spawn slot %d is not on the mountain" % slot)
 		check(float(level_node.call("_height_at", spawn.x, spawn.z)) <= 1.2, "Start pad slot %d sits on a slope" % slot)
 	var last_height := 1.0
@@ -113,7 +114,7 @@ func _initialize() -> void:
 		if not (child is StaticBody3D):
 			continue
 		var child_name := str(child.name)
-		if child_name == "ProceduralMountain" or child_name.begins_with("EntranceHold_") or child_name.begins_with("EntranceRest_"):
+		if child_name == "ProceduralMountain" or child_name == "StartPad" or child_name.begins_with("EntranceHold_") or child_name.begins_with("EntranceRest_"):
 			continue
 		var block_pos: Vector3 = (child as StaticBody3D).position
 		check(not (absf(block_pos.x) < 8.0 and block_pos.z > -2.0 and block_pos.z < 12.0 and block_pos.y < 34.0),
