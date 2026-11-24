@@ -91,9 +91,11 @@ on UDP port `7777`.
   with two hands.
 - One jetpack slot only. Fuel can be refilled, but the item never duplicates.
 - Starting cabin with control pictograms and a large
-  **BRING WATER TO YOUR HOUSE** mission sign in the world.
-- A seeded procedural mountain with a real sloping rock/snow surface, narrow
-  irregular holds, overhangs and a steep summit cap.
+  **BRING WATER TO YOUR HOUSE** mission sign in the world. A wide flat corridor
+  keeps the doorway and the first steps outside free of rock and low holds.
+- A seeded procedural mountain with a real sloping rock/snow surface, generous
+  irregular ledges, overhangs and a steep summit cap. Checkpoint pads, moving
+  platforms and the summit deck are wider than before.
 - Checkpoints, wind gusts, brittle holds, moving platforms and patrolling enemy
   drones get harder near the summit. There are no lives: falls cost time.
 - A narrow alternate spire with small sloped holds, wide gaps and sharp

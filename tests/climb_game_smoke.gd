@@ -142,6 +142,8 @@ func _initialize() -> void:
 		var collision: CollisionShape3D = mountain.find_child("CollisionShape3D", true, false) as CollisionShape3D
 		check(collision != null and (collision.shape is ConcavePolygonShape3D), "Mountain collision missing")
 		check(level_node.has_method("_height_at"), "Mountain height generator missing")
+		check(float(level_node.call("_height_at", 0.0, -6.55)) <= 1.2, "Mountain still blocks the cabin doorway")
+		check(float(level_node.call("_height_at", 0.0, 0.0)) <= 1.5, "Cabin exit corridor is not flat")
 	var bucket = null
 	for candidate in props:
 		if str(candidate.get("prop_id")) == "bucket_0":
@@ -189,11 +191,21 @@ func _initialize() -> void:
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Carry link not cleared")
 
-		# Strong grabs the awake Elastic with F; Q throws them via the new RPC.
+		# Strong can simply lift the awake Elastic with both hands: no launch.
+		climber2.set("last_launch_velocity", Vector3.ZERO)
 		game.call("request_carry", 1, "2")
 		await process_frame
 		check(int(climber1.get("carry_kind")) == 1, "Strong did not carry the awake Elastic")
 		check(int(climber2.get("carried_by_peer")) == 1, "Elastic was not marked as carried")
+		check((climber2.get("last_launch_velocity") as Vector3).length_squared() <= 0.01, "Lifting the Elastic launched them")
+		game.call("request_drop")
+		await process_frame
+		check(int(climber1.get("carry_kind")) == -1, "Gentle drop did not clear the carry link")
+		check((climber2.get("last_launch_velocity") as Vector3).length_squared() <= 0.01, "Gentle drop launched the Elastic")
+
+		# F carry followed by Q throws them high via the authoritative RPC.
+		game.call("request_carry", 1, "2")
+		await process_frame
 		game.call("request_throw_elastic", 1)
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Q throw did not clear the carry link")

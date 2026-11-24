@@ -597,7 +597,7 @@ func request_throw_elastic(carrier_pid: int) -> void:
 		or bool(target.get("unconscious"))
 	):
 		return
-	_clear_carry_link(carrier_pid, true)
+	_clear_carry_link(carrier_pid, true, true)
 	_notify("ELASTIC THROWN")
 
 
@@ -621,7 +621,7 @@ func _authorize_throw_elastic(sender_pid: int, carrier_pid: int) -> void:
 		or bool(target.get("unconscious"))
 	):
 		return
-	_clear_carry_link(carrier_pid, true)
+	_clear_carry_link(carrier_pid, true, true)
 	_notify("ELASTIC THROWN")
 
 
@@ -661,7 +661,7 @@ func _authorize_quick_throw(sender_pid: int, carrier_pid: int, target_id: String
 		return
 	_apply_carry_link(carrier_pid, 1, target_id)
 	_broadcast_carry_link(carrier_pid, 1, target_id)
-	_clear_carry_link(carrier_pid, true)
+	_clear_carry_link(carrier_pid, true, true)
 	_notify("ELASTIC THROWN")
 
 
@@ -780,7 +780,7 @@ func _apply_carry_link(carrier_pid: int, kind: int, target_id: String) -> void:
 	_carry_links[carrier_pid] = {"kind": kind, "target_id": target_id}
 
 
-func _clear_carry_link(carrier_pid: int, broadcast: bool) -> void:
+func _clear_carry_link(carrier_pid: int, broadcast: bool, launch_elastic: bool = false) -> void:
 	var link: Dictionary = _carry_links.get(carrier_pid, {})
 	_carry_links.erase(carrier_pid)
 	if broadcast and _has_network() and _is_authority():
@@ -802,7 +802,8 @@ func _clear_carry_link(carrier_pid: int, broadcast: bool) -> void:
 		if target != null and target.has_method("set_carried_by"):
 			target.call("set_carried_by", 0)
 			if (
-				carrier != null
+				launch_elastic
+				and carrier != null
 				and is_strong_climber(carrier)
 				and is_elastic_climber(target)
 				and not bool(target.get("unconscious"))

@@ -729,3 +729,33 @@ being thrown.
 `elastic_fall_safe_speed_bonus = 3.0` to the safe speed for Elastic, while Strong
 keeps the original values. Damage, stamina lock, injury and stun all scale with
 the reduced loss.
+
+## 34. Cabin exit blocked and platforms too tight
+
+**Symptom**
+
+Low rock/ledge geometry could sit in the cabin doorway, and several mountain
+platforms were too small to land on comfortably.
+
+**Fix**
+
+`_height_at()` now flattens a broad corridor from the cabin door out to the
+first climbable slope, and `_build_rocks()` plus low ledge/rib generation skip
+that corridor. Ledge width/depth ranges, moving platforms, checkpoint pads and
+the summit pad were enlarged. The Strong's simple two-hand lift remains the
+`F` pickup; `Q` is only the throw, and a gentle `F` drop never launches the
+Elastic.
+
+## 35. F drop still launched the Elastic
+
+**Symptom**
+
+Pressing `F` while carrying an awake Elastic applied the same high throw as
+`Q`, because `_clear_carry_link()` launched on every link removal.
+
+**Fix**
+
+`_clear_carry_link()` now takes `launch_elastic: bool = false`. Only
+`request_throw_elastic()`, its RPC handler and the quick-throw handler pass
+`true`; `F` drops, carry replacement, respawns and watchdog cleanup keep the
+default and simply release the passenger.

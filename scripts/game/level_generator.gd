@@ -200,7 +200,12 @@ func _height_at(x: float, z: float) -> float:
 	var height := 1.0 + profile + ridges
 	var cabin_d := Vector2(x, z + 11.0).length()
 	var cabin_carve := 1.0 - smoothstep(5.0, 8.0, cabin_d)
-	height = lerpf(height, 1.0, cabin_carve)
+	# Keep a flat, wide path from the cabin door to the first climbable slope.
+	# Without this the mountain rises directly in the doorway.
+	var exit_band := smoothstep(-8.0, -5.0, z) * (1.0 - smoothstep(1.0, 5.0, z))
+	var exit_width := 1.0 - smoothstep(3.5, 7.0, absf(x))
+	var exit_carve := exit_band * exit_width
+	height = lerpf(height, 1.0, maxf(cabin_carve, exit_carve))
 	if distance < 2.6:
 		height = lerpf(height, SUMMIT_Y, clampf((2.6 - distance) / 2.6, 0.0, 1.0))
 	return maxf(1.0, height)
@@ -295,8 +300,11 @@ func _build_mountain_routes() -> void:
 				angle,
 				rng.randf_range(0.7, 1.9)
 			)
-			var width := rng.randf_range(lerpf(2.6, 1.2, difficulty), lerpf(3.5, 1.9, difficulty))
-			var depth := rng.randf_range(lerpf(1.9, 0.8, difficulty), lerpf(2.7, 1.3, difficulty))
+			# Low holds must not appear in the cabin doorway or exit path.
+			if pos.y < 10.0 and absf(pos.x) < 6.0 and pos.z < 6.0:
+				continue
+			var width := rng.randf_range(lerpf(4.2, 2.2, difficulty), lerpf(5.4, 3.0, difficulty))
+			var depth := rng.randf_range(lerpf(3.2, 1.6, difficulty), lerpf(4.2, 2.4, difficulty))
 			var material: Material = _brittle_material if difficulty > 0.55 and rng.randf() < 0.25 else _hold_material
 			var rotation := Vector3(
 				rng.randf_range(-0.18, 0.18),
@@ -321,6 +329,8 @@ func _build_mountain_routes() -> void:
 		if i % 2 == 1:
 			var rib_angle := base_angle + 0.9
 			var rib := _mountain_point(y - 1.0, rib_angle, 0.2)
+			if rib.y < 10.0 and absf(rib.x) < 6.0 and rib.z < 6.0:
+				continue
 			_add_box(
 				rib, Vector3(0.65, 6.2, 2.6), _wall_material, null,
 				Vector3(rng.randf_range(-0.12, 0.12), rib_angle, rng.randf_range(-0.16, 0.16))
@@ -356,7 +366,7 @@ func _build_rocks() -> void:
 		var x := cos(angle) * radius
 		var z := MOUNTAIN_CENTER_Z + sin(angle) * radius
 		# Never drop a boulder in the cabin exit corridor.
-		if absf(x) < 4.5 and z > -12.0 and z < -2.5:
+		if absf(x) < 6.0 and z > -12.0 and z < 6.0:
 			continue
 		var rock_point := Vector3(x, _height_at(x, z) + 0.4, z)
 		var holder := _instance_model(MODEL_ROCK)
@@ -404,7 +414,7 @@ func _build_checkpoints() -> void:
 		var height: float = heights[i]
 		var angle := 0.7 + float(i) * 2.1
 		var pos := _mountain_point(height, angle, 1.2)
-		_add_box(pos, Vector3(4.4, 0.7, 4.4), _checkpoint_material)
+		_add_box(pos, Vector3(6.0, 0.7, 6.0), _checkpoint_material)
 		_add_box(pos + Vector3(0, 1.7, 0), Vector3(0.32, 3.2, 0.32), _beacon_material)
 		var area := _add_hazard(pos + Vector3(0, 2.0, 0), Vector3(5.4, 5.0, 5.4), KIND_CHECKPOINT, "CHECKPOINT %d m" % int(height))
 		area.set("checkpoint_height", height)
@@ -467,14 +477,14 @@ func _build_moving_platforms() -> void:
 		var travel_length := 9.0 + float(i) * 1.5
 		var travel := Vector3(-sin(angle) * travel_length, rng.randf_range(0.0, 1.2), cos(angle) * travel_length)
 		var platform = HAZARD_SCRIPT.MovingPlatform.new()
-		platform.call("setup", origin, travel, 3.6 + float(i) * 0.5, rng.randf_range(0.0, 1.0), Vector3(3.0, 0.6, 2.8), _moving_material)
+		platform.call("setup", origin, travel, 3.6 + float(i) * 0.5, rng.randf_range(0.0, 1.0), Vector3(4.4, 0.6, 3.8), _moving_material)
 		add_child(platform)
 		var anchor := _mountain_point(heights[i] - 4.0, angle, 0.4)
 		_add_box(anchor, Vector3(2.2, 0.5, 2.2), _hold_material, null, Vector3(0, angle, 0))
 
 
 func _build_summit() -> void:
-	_add_box(Vector3(summit_position.x, 141.0, summit_position.z), Vector3(6.0, 1.0, 6.0), _summit_material)
+	_add_box(Vector3(summit_position.x, 141.0, summit_position.z), Vector3(8.0, 1.0, 8.0), _summit_material)
 	_add_box(Vector3(summit_position.x, 143.6, summit_position.z), Vector3(1.2, 5.0, 1.2), _beacon_material)
 	var area := _add_hazard(Vector3(summit_position.x, 142.8, summit_position.z), Vector3(8, 5, 8), KIND_SUMMIT, "SUMMIT")
 	area.connect(&"summit_reached", Callable(self, "_on_hazard_summit"))
