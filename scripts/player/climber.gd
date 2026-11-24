@@ -1228,9 +1228,30 @@ func _request_drop() -> void:
 
 func _request_throw_elastic() -> void:
 	var manager := _game_manager()
-	if manager == null or not manager.has_method("request_throw_elastic"):
+	if manager == null:
 		return
-	manager.call("request_throw_elastic", peer_id)
+	if carry_kind == 1 and is_instance_valid(_carry_node):
+		var held := _carry_node
+		if not bool(held.get("unconscious")) and int(held.get("character_type")) == CharacterType.ELASTIC:
+			manager.call("request_throw_elastic", peer_id)
+			return
+	# Quick throw: Q beside an awake Elastic grabs and launches them in one move.
+	var best_id := ""
+	var best_distance := carry_reach
+	for candidate in get_tree().get_nodes_in_group("climbers"):
+		if not can_carry_climber(candidate) or int(candidate.get("character_type")) != CharacterType.ELASTIC:
+			continue
+		if bool(candidate.get("unconscious")):
+			continue
+		var distance := global_position.distance_to(candidate.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best_id = str(int(candidate.get("peer_id")))
+	if best_id.is_empty():
+		notice_requested.emit("NO ELASTIC IN REACH")
+		return
+	if manager.has_method("request_quick_throw"):
+		manager.call("request_quick_throw", peer_id, best_id)
 
 
 func _carry_mass() -> float:

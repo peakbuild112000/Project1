@@ -173,6 +173,17 @@ func _initialize() -> void:
 		check(launch.y >= 20.0, "Q throw is not high enough (y=%.2f)" % launch.y)
 		check(launch.length_squared() > 1.0, "Q throw did not launch the Elastic")
 
+		# Q also throws a nearby Elastic directly, without the F pickup step.
+		check(game.has_method("request_quick_throw"), "Quick throw RPC missing")
+		climber2.set("last_launch_velocity", Vector3.ZERO)
+		climber2.set("linear_velocity", Vector3.ZERO)
+		climber2.set("global_position", climber1.global_position + Vector3(1.2, 0.0, 0.0))
+		climber1.call("_request_throw_elastic")
+		await process_frame
+		var quick_launch: Vector3 = climber2.get("last_launch_velocity")
+		check(quick_launch.y >= 20.0, "Quick Q throw is not high enough (y=%.2f)" % quick_launch.y)
+		check(int(climber1.get("carry_kind")) == -1, "Quick throw left a carry link")
+
 		# Coop building: a carrier cannot anchor their own object, but a nearby
 		# climber can fix and release it. Anchored props cannot be picked up.
 		var build_prop: Node = null

@@ -696,3 +696,19 @@ explicit "ELASTIC CANNOT CLIMB" notice. The Elastic still tensions its tail with
 `Q` so the Strong can climb it. `STRONG_THROW_UP` was raised from `11.0` to
 `22.0` with reduced forward speed, and the HUD marks the Elastic as
 `NO CLIMB`.
+
+## 32. Strong needed an easier way to launch the Elastic
+
+**Symptom**
+
+`Q` only threw an Elastic that was already being carried after a separate `F`
+pickup, so the throw was easy to miss in the heat of climbing.
+
+**Fix**
+
+`Q` now also performs a one-key quick throw: `Climber._request_throw_elastic()`
+finds the nearest awake Elastic within `carry_reach`, and the host-authoritative
+`request_quick_throw()` / `rpc_request_quick_throw()` validate the Strong/Elastic
+pair, the sender id and the distance before applying and immediately clearing a
+carry link. The existing carry-and-throw path stays unchanged, `F` remains the
+gentle drop, and the Strong HUD advertises `[Q: THROW ELASTIC]`.

@@ -617,6 +617,46 @@ func _authorize_throw_elastic(sender_pid: int, carrier_pid: int) -> void:
 	_notify("ELASTIC THROWN")
 
 
+## One-key throw: Q beside an awake Elastic lifts and launches them without a
+## separate F pickup. The host validates the pair and the distance before
+## creating (and immediately clearing) the carry link.
+func request_quick_throw(carrier_pid: int, target_id: String) -> void:
+	if not _is_authority():
+		rpc_id(1, "rpc_request_quick_throw", carrier_pid, target_id)
+		return
+	_authorize_quick_throw(carrier_pid, carrier_pid, target_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_request_quick_throw(carrier_pid: int, target_id: String) -> void:
+	_authorize_quick_throw(_peer_of_sender(multiplayer.get_remote_sender_id()), carrier_pid, target_id)
+
+
+func _authorize_quick_throw(sender_pid: int, carrier_pid: int, target_id: String) -> void:
+	if not _is_authority() or _phase == PHASE_ENDED or sender_pid != carrier_pid:
+		return
+	if _carry_links.has(carrier_pid):
+		return
+	var carrier: Node = _find_climber_by_id(carrier_pid)
+	var target: Node = _find_climber_by_id(int(target_id))
+	if (
+		carrier == null or target == null
+		or not is_strong_climber(carrier)
+		or not is_elastic_climber(target)
+		or bool(target.get("dead"))
+		or bool(target.get("unconscious"))
+		or int(target.get("carried_by_peer")) > 0
+	):
+		return
+	var reach := float(carrier.get("carry_reach"))
+	if carrier.global_position.distance_to(target.global_position) > reach:
+		return
+	_apply_carry_link(carrier_pid, 1, target_id)
+	_broadcast_carry_link(carrier_pid, 1, target_id)
+	_clear_carry_link(carrier_pid, true)
+	_notify("ELASTIC THROWN")
+
+
 func request_drop() -> void:
 	if _is_authority():
 		_authorize_drop(_local_id)
