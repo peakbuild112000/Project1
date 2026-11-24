@@ -88,10 +88,11 @@ func _initialize() -> void:
 	for slot in range(4):
 		var spawn: Vector3 = level_node.call("get_spawn_point", slot)
 		check(absf(spawn.y - 3.05) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
-		check(absf(spawn.z + 1.0) <= 0.01, "Spawn slot %d is not at the bottom of the mountain" % slot)
+		check(absf(spawn.z - 16.0) <= 1.3, "Spawn slot %d is not at the mountain centre" % slot)
 		check(absf(spawn.x) <= 1.5, "Spawn slot %d is not centred on the mountain" % slot)
-		check(sqrt(spawn.x * spawn.x + (spawn.z - 16.0) * (spawn.z - 16.0)) < 19.0, "Spawn slot %d is not on the mountain" % slot)
+		check(sqrt(spawn.x * spawn.x + (spawn.z - 16.0) * (spawn.z - 16.0)) <= 2.0, "Spawn slot %d is not at the exact base centre" % slot)
 		check(float(level_node.call("_height_at", spawn.x, spawn.z)) <= 1.2, "Start pad slot %d sits on a slope" % slot)
+		check(absf(float(level_node.call("_height_at", 0.0, 16.0)) - 1.0) <= 0.01, "Mountain base centre is not the lowest point")
 	var last_height := 1.0
 	for step in range(1, 5):
 		var z := float(step) * 2.0
@@ -119,6 +120,19 @@ func _initialize() -> void:
 		var block_pos: Vector3 = (child as StaticBody3D).position
 		check(not (absf(block_pos.x) < 8.0 and block_pos.z > -2.0 and block_pos.z < 12.0 and block_pos.y < 34.0),
 			"A generated wall blocks the entrance: %s" % child_name)
+	var shaft_holds: Array[Node] = []
+	for child in level_node.get_children():
+		if str(child.name).begins_with("ShaftHold_"):
+			shaft_holds.append(child)
+	check(shaft_holds.size() >= 50, "Central shaft has too few grips")
+	shaft_holds.sort_custom(func(a: Node, b: Node) -> bool:
+		return (a as Node3D).position.y < (b as Node3D).position.y)
+	var shaft_y := 3.05
+	for hold in shaft_holds:
+		var hold_pos: Vector3 = (hold as Node3D).position
+		check(hold_pos.y - shaft_y <= 3.0, "Central shaft has an unreachable vertical gap")
+		shaft_y = hold_pos.y
+	check(shaft_y >= 138.0, "Central shaft does not reach the summit platform")
 
 	game.call("_authorize_item", 1, "jetpack_0")
 	await process_frame

@@ -17,6 +17,7 @@ const SUMMIT_Y := 142.0
 const MOUNTAIN_CENTER_Z := 16.0
 const MOUNTAIN_BASE_RADIUS := 19.0
 const MOUNTAIN_GRID := 49
+const SHAFT_RADIUS := 5.0
 const MODEL_TRAMPOLINE := "res://assets/models/trampoline.glb"
 const MODEL_JETPACK := "res://assets/models/jetpack.glb"
 const MODEL_ROCK := "res://assets/models/rock.glb"
@@ -67,6 +68,7 @@ func generate(match_seed: int) -> void:
 	_build_base()
 	_build_mountain_surface()
 	_build_start_holds()
+	_build_shaft_route()
 	_build_mountain_routes()
 	_build_difficult_pillar()
 	_build_rocks()
@@ -162,13 +164,18 @@ func _add_hazard(pos: Vector3, size: Vector3, kind: int, hazard_label: String) -
 
 func _build_base() -> void:
 	_add_box(Vector3(0, -0.5, MOUNTAIN_CENTER_Z), Vector3(52, 3, 52), _base_material)
-	# Small flat pad at the very bottom and horizontal centre of the mountain.
-	# The four slots are clustered around x = 0 so everybody starts in the middle.
-	var pad := _add_box(Vector3(0, 2.0, -1.0), Vector3(8.0, 0.4, 3.0), _accent_material)
+	# Flat pad at the exact horizontal centre of the mountain base. The crater
+	# floor in _height_at() makes this the lowest point inside the mountain.
+	var pad := _add_box(Vector3(0, 2.0, MOUNTAIN_CENTER_Z), Vector3(10.0, 0.4, 10.0), _accent_material)
 	pad.name = "StartPad"
-	var x_positions: Array[float] = [-1.5, -0.5, 0.5, 1.5]
-	for x in x_positions:
-		spawn_points.append(Vector3(x, 3.05, -1.0))
+	var offsets: Array[Vector3] = [
+		Vector3(-1.2, 0.0, -1.2),
+		Vector3(-0.4, 0.0, 0.4),
+		Vector3(0.4, 0.0, -0.4),
+		Vector3(1.2, 0.0, 1.2),
+	]
+	for offset in offsets:
+		spawn_points.append(Vector3(offset.x, 3.05, MOUNTAIN_CENTER_Z + offset.z))
 
 
 func _build_start_holds() -> void:
@@ -187,6 +194,22 @@ func _build_start_holds() -> void:
 				Vector3(3.0, 0.4, 1.5), _accent_material
 			)
 			rest.name = "EntranceRest_%d" % i
+
+
+func _build_shaft_route() -> void:
+	## The spawn is inside the mountain, so a spiral of grips climbs the central
+	## shaft from the base pad all the way to the summit platform.
+	for i in range(56):
+		var y := 4.0 + float(i) * 2.5
+		var angle := float(i) * 0.42
+		var radius := 3.7
+		var pos := Vector3(cos(angle) * radius, y, MOUNTAIN_CENTER_Z + sin(angle) * radius)
+		var rotation := Vector3(0.0, angle - PI * 0.5, 0.0)
+		var body := _add_box(pos, Vector3(3.2, 0.45, 1.8), _hold_material, null, rotation)
+		body.name = "ShaftHold_%d" % i
+		if i % 6 == 5:
+			var rest := _add_box(pos + Vector3(0.0, 0.4, 0.0), Vector3(3.0, 0.4, 2.2), _accent_material, null, rotation)
+			rest.name = "ShaftRest_%d" % i
 
 
 func _entrance_z_for_height(x: float, target_y: float) -> float:
@@ -220,6 +243,10 @@ func _height_at(x: float, z: float) -> float:
 	height = lerpf(height, 1.0, start_band * start_width)
 	if distance < 2.6:
 		height = lerpf(height, SUMMIT_Y, clampf((2.6 - distance) / 2.6, 0.0, 1.0))
+	# Carve the central shaft: the exact base centre is the lowest point, with
+	# a spiral of holds from there up to the summit platform.
+	var shaft := 1.0 - smoothstep(SHAFT_RADIUS - 1.0, SHAFT_RADIUS + 1.0, distance)
+	height = lerpf(height, 1.0, shaft)
 	return maxf(1.0, height)
 
 

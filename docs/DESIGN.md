@@ -186,16 +186,15 @@ player count only.
 - Deterministic seeded mountain: the host chooses one seed and sends it with the
   start RPC so every peer builds the same heightfield, concave collider, ledges,
   overhangs, hazards, checkpoints, summit, props and pickups.
-- `_build_base()` creates a small flat start pad named `StartPad` at
-  `(0, 2.0, -1)` at the very bottom and horizontal centre of the mountain, with
-  four tightly clustered spawn points at `x = -1.5, -0.5, 0.5, 1.5`, `y = 3.05`,
-  `z = -1`. `_height_at()` flattens only the pocket under the pad and
-  lets the natural base slope resume immediately, so there is no artificial
-  cliff at the entrance. `_entrance_z_for_height()` places thirteen guaranteed
-  grips, spaced 2.5 m in altitude and alternating around `x = ±1.3`, so the
-  front face is climbable with the 14 m harpoon. Procedural ledges, ribs,
-  overhangs and boulders skip the whole `|x| < 8`, `z < 12`, `y < 42` corridor;
-  the camera starts at `START_YAW = PI`, facing the summit.
+- `_build_base()` creates a flat start pad named `StartPad` at the exact base
+  centre `(0, 2.0, 16)`, with four spawn slots within 2 m of `(0, 3.05, 16)`.
+  `_height_at()` carves a `SHAFT_RADIUS = 5` crater so that centre is the lowest
+  point (1 m) inside the mountain. `_build_shaft_route()` adds 56 spiral grips
+  from 4 m to 141 m so racers climb from the base centre to the summit platform.
+  The front-face corridor and its thirteen `_entrance_z_for_height()` grips stay
+  as an alternate route; procedural ledges, ribs, overhangs and boulders skip
+  `|x| < 8`, `z < 12`, `y < 42`. The camera starts at `START_YAW = PI` with
+  `START_PITCH_DEG = 35`, looking up the shaft toward the summit.
 - `_build_props()` places four trampolines at 28 m, 68 m, 96 m and 132 m.
   `_build_items()` places two jetpacks at 16 m and 82 m.
 - Checkpoints are at 26 m, 64 m and 104 m; `get_checkpoint_position(height)`

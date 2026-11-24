@@ -14,6 +14,9 @@ class_name PlayerCamera
 ## The racers start on the near side of the mountain, so spawn facing +Z toward
 ## the summit instead of the empty space behind the start pad.
 const START_YAW := PI
+## Racers start at the base centre, directly under the summit, so the view
+## begins tilted up toward the first grips of the central shaft.
+const START_PITCH_DEG := 35.0
 
 var pitch_deg: float = 0.0
 var yaw_rad: float = 0.0
@@ -38,19 +41,21 @@ func setup_local(local: bool) -> void:
 	if camera != null:
 		camera.current = local
 	if local:
-		pitch_deg = 0.0
+		pitch_deg = START_PITCH_DEG
 		yaw_rad = START_YAW
 		rotation = Vector3(0.0, yaw_rad, 0.0)
+		if camera != null:
+			camera.rotation_degrees.x = pitch_deg
 		if global_position.distance_squared_to(_desired_position()) > 625.0:
 			global_position = _desired_position()
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	else:
-		pitch_deg = 0.0
+		pitch_deg = START_PITCH_DEG
 		yaw_rad = START_YAW
 		rotation = Vector3(0.0, yaw_rad, 0.0)
 		if camera != null:
 			camera.position = Vector3.ZERO
-			camera.rotation_degrees.x = 0.0
+			camera.rotation_degrees.x = pitch_deg
 
 
 func get_camera() -> Camera3D:

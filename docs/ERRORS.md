@@ -914,3 +914,25 @@ bottom of the mountain. The four slots are `x = -1.5, -0.5, 0.5, 1.5`,
 `y = 3.05`, `z = -1`, all inside the footprint and grouped around `x = 0`.
 Validation checks the centred `x` and bottom `z` for every slot and excludes
 `StartPad` from the entrance-wall scan.
+
+## 41. Centre spawns still looked outside the mountain
+
+**Symptom**
+
+Even with the pad centred at `x = 0`, the climbers appeared in front of the
+visible cone instead of at the exact centre of its base.
+
+**Cause**
+
+`z = -1` lies near the front edge of the 19 m base radius, so the flattened
+pocket read as an apron outside the mountain silhouette. The exact base centre
+`(0, 16)` was occupied by the solid summit profile at 142 m.
+
+**Fix**
+
+`_height_at()` now carves a `SHAFT_RADIUS = 5` crater, making the exact centre
+the lowest point (1 m). The `StartPad` is a 10 m square at `(0, 2.0, 16)` and
+the four spawns sit within 2 m of `(0, 3.05, 16)`. `_build_shaft_route()` places
+56 spiral grips from 4 m to 141 m so the race starts inside the mountain and
+climbs its central shaft to the existing summit platform. Validation checks the
+centre coordinates, the 1 m floor and a continuous grip ladder to 138 m.
