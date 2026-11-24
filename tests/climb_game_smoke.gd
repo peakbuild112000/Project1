@@ -87,10 +87,16 @@ func _initialize() -> void:
 	check(level_node.has_method("_height_at"), "Mountain height generator missing")
 	for slot in range(4):
 		var spawn: Vector3 = level_node.call("get_spawn_point", slot)
-		check(absf(spawn.y - 1.95) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
-		check(absf(spawn.z - 2.0) <= 0.01, "Spawn slot %d sits outside the mountain footprint" % slot)
+		check(absf(spawn.y - 3.05) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
+		check(absf(spawn.z + 2.0) <= 0.01, "Spawn slot %d sits outside the mountain footprint" % slot)
 		check(sqrt(spawn.x * spawn.x + (spawn.z - 16.0) * (spawn.z - 16.0)) < 19.0, "Spawn slot %d is not on the mountain" % slot)
 		check(float(level_node.call("_height_at", spawn.x, spawn.z)) <= 1.2, "Start pad slot %d sits on a slope" % slot)
+	var last_height := 1.0
+	for step in range(1, 5):
+		var z := float(step) * 2.0
+		var height := float(level_node.call("_height_at", 0.0, z))
+		check(absf(height - last_height) < 20.0, "Unclimbable wall in the entrance at z=%d" % int(z))
+		last_height = height
 
 	game.call("_authorize_item", 1, "jetpack_0")
 	await process_frame

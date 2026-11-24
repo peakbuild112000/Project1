@@ -182,11 +182,13 @@ player count only.
 - Deterministic seeded mountain: the host chooses one seed and sends it with the
   start RPC so every peer builds the same heightfield, concave collider, ledges,
   overhangs, hazards, checkpoints, summit, props and pickups.
-- `_build_base()` creates a flat start pad at `(0, 0.9, 2)` on the lower shoulder
+- `_build_base()` creates a flat start pad at `(0, 2.0, -2)` at the natural foot
   of the mountain and four spawn points at `x = -4.5, -1.5, 1.5, 4.5`,
-  `y = 1.95`, `z = 2`. `_height_at()` flattens the same start band, and low
-  ledges/ribs/boulders skip it so nobody begins outside the route. The camera
-  starts at `START_YAW = PI`, facing the summit.
+  `y = 3.05`, `z = -2`. `_height_at()` flattens only the pocket under the pad and
+  lets the natural base slope resume immediately, so there is no artificial
+  cliff at the entrance. `_build_start_holds()` guarantees seven grips along
+  that slope; low ribs and boulders skip the corridor. The camera starts at
+  `START_YAW = PI`, facing the summit.
 - `_build_props()` places four trampolines at 28 m, 68 m, 96 m and 132 m.
   `_build_items()` places two jetpacks at 16 m and 82 m.
 - Checkpoints are at 26 m, 64 m and 104 m; `get_checkpoint_position(height)`

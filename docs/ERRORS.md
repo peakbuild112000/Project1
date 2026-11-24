@@ -829,9 +829,35 @@ into shadow and haze.
 
 **Fix**
 
-The start pad and spawn points moved to `z = 2` on the lower shoulder, and
-`_height_at()` flattens `z = -4..8` so the pad stays level. Low ledges, ribs and
-boulders now skip the wider start corridor. `PlayerCamera.setup_local()` starts
-at `START_YAW = PI`, so every racer looks straight at the summit. The sun is
-placed at `y = 180` with a steep `-86°` angle, the shadow range was raised to
-260 m and fog density dropped to `0.0025`, making the whole climb visible.
+The start pad and spawn points first moved to `z = 2` on the lower shoulder,
+with the flatten band extended to `z = -4..8`. That made the pad level but left
+a sheer cliff at its far edge. The final layout is described in section 38.
+`PlayerCamera.setup_local()` starts at `START_YAW = PI`, so every racer looks
+straight at the summit. The sun is placed at `y = 180` with a steep `-86°`
+angle, the shadow range was raised to 260 m and fog density dropped to
+`0.0025`, making the whole climb visible.
+
+## 38. A sheer wall blocked the entrance to the mountain
+
+**Symptom**
+
+Racers could not leave the start pad: the flattened band ended abruptly and the
+procedural height jumped from 1 m at `z = 8` to more than 55 m at `z = 10`.
+
+**Cause**
+
+`_height_at()` forced the terrain to 1 m through the whole pad area, then
+blended back into the mountain profile over only 3 m. Because the mountain
+profile is very steep near the base, that blend produced a near-vertical face
+with no grips, so the route was physically unreachable.
+
+**Fix**
+
+The pad returned to the natural foot of the mountain at `z = -2`, raised to
+`y = 2.0` so its top is `2.2` and racers spawn at `y = 3.05`. Its depth was
+reduced to 4 m. The flatten band now only covers the pocket under the pad
+(`z = -4..0`) and releases by `z = 2`, so heights rise continuously:
+1 m at `z = 0`, 12.6 m at `z = 2`, 22.9 m at `z = 4`. `_build_start_holds()`
+adds seven guaranteed grips along that first slope, while vertical ribs and
+boulders still skip the entrance corridor. Validation now rejects any height
+jump over 20 m between consecutive 2 m samples in the entrance.
