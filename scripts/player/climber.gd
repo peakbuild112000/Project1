@@ -138,6 +138,10 @@ class ArmAnchor:
 @export var fall_damp_min: float = 0.14
 @export var fall_speed_cap: float = 70.0
 @export var fall_damage_per_second: float = 4.5
+## Elastic bodies absorb landings: they take less stamina lock per fall and
+## tolerate a faster impact before damage starts.
+@export var elastic_fall_damage_scale: float = 0.45
+@export var elastic_fall_safe_speed_bonus: float = 3.0
 @export var long_fall_notice_time: float = 1.4
 @export var injury_regen_penalty: float = 0.75
 @export var hazard_damage_base: float = 7.0
@@ -1002,11 +1006,19 @@ func apply_fall_impact(impact_speed: float, fall_duration: float = 0.0) -> void:
 	# Long drops hurt twice: gravity made the impact faster, and the air time
 	# itself lowers the safe speed threshold. A short fall stays as forgiving as
 	# before because duration is zero when this API is called directly.
+	var damage_scale := 1.0
+	var safe_bonus := 0.0
+	if is_elastic():
+		damage_scale = elastic_fall_damage_scale
+		safe_bonus = elastic_fall_safe_speed_bonus
 	var effective_speed := speed + duration * fall_damage_per_second
-	var safe_speed := maxf(4.0, fall_damage_min_speed - duration * 1.5)
+	var safe_speed := maxf(4.0, fall_damage_min_speed + safe_bonus - duration * 1.5)
 	if effective_speed < safe_speed:
 		return
-	var loss := clampf((effective_speed - safe_speed) * fall_damage_per_speed, 0.0, fall_damage_max)
+	var loss := clampf(
+		(effective_speed - safe_speed) * fall_damage_per_speed * damage_scale,
+		0.0, fall_damage_max
+	)
 	if loss <= 0.0:
 		return
 	current_stamina = maxf(0.0, current_stamina - loss)

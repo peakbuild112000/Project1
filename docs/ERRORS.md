@@ -711,4 +711,21 @@ finds the nearest awake Elastic within `carry_reach`, and the host-authoritative
 `request_quick_throw()` / `rpc_request_quick_throw()` validate the Strong/Elastic
 pair, the sender id and the distance before applying and immediately clearing a
 carry link. The existing carry-and-throw path stays unchanged, `F` remains the
-gentle drop, and the Strong HUD advertises `[Q: THROW ELASTIC]`.
+gentle drop, and the Strong HUD advertises `[Q: THROW ELASTIC]`. Picking up an
+awake Elastic also announces `ELASTIC HELD - Q TO THROW / F TO PUT DOWN`, and the
+cabin caption reads `CARRY / Q THROW`.
+
+## 33. Elastic fell as hard as Strong
+
+**Symptom**
+
+A thrown Elastic could lose as much stamina and injury as a Strong climber from
+the same landing, even though the Elastic is the rubbery class that depends on
+being thrown.
+
+**Fix**
+
+`apply_fall_impact()` now applies `elastic_fall_damage_scale = 0.45` and adds
+`elastic_fall_safe_speed_bonus = 3.0` to the safe speed for Elastic, while Strong
+keeps the original values. Damage, stamina lock, injury and stun all scale with
+the reduced loss.

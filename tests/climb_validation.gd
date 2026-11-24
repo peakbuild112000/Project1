@@ -114,6 +114,8 @@ func _initialize() -> void:
 			check(int(tail.get("tension_version")) >= 0, "Tail tension has no version")
 		check(climber.has_method("can_carry_climber"), "Climber cannot lift a teammate")
 		check(climber.has_method("can_climb"), "Climber has no class climb gate")
+		check(float(climber.get("elastic_fall_damage_scale")) <= 0.6, "Elastic fall damage must be reduced")
+		check(float(climber.get("elastic_fall_safe_speed_bonus")) >= 1.0, "Elastic needs a higher safe landing speed")
 		var saved_type := int(climber.get("character_type"))
 		climber.call("set_character_type", CharacterType.ELASTIC)
 		check(not bool(climber.call("can_climb")), "Elastic must not be able to climb")

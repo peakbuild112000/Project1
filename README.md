@@ -78,6 +78,8 @@ on UDP port `7777`.
   grappling line toward the camera; a Strong teammate can hook that line with a
   hand and climb it. The Elastic pays stamina while the rope is stretched but
   cannot grapple, winch, mantle or climb, so it relies on Strong throws to rise.
+  Being rubbery, the Elastic takes 55% less fall damage and tolerates faster
+  landings than the Strong, whose falls hit the full stamina lock.
   The rope stops at the first wall instead of passing through it. Releasing `Q`
   drops any teammate grappling the rope, so slack cannot yank them through
   walls. The tail can also be grabbed with `F`, carried and thrown; it collides
