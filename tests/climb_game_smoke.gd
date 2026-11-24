@@ -170,6 +170,7 @@ func _initialize() -> void:
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Q throw did not clear the carry link")
 		var launch: Vector3 = climber2.get("last_launch_velocity")
+		check(launch.y >= 20.0, "Q throw is not high enough (y=%.2f)" % launch.y)
 		check(launch.length_squared() > 1.0, "Q throw did not launch the Elastic")
 
 		# Coop building: a carrier cannot anchor their own object, but a nearby

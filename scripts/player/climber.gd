@@ -1433,16 +1433,21 @@ func _process_climb(delta: float) -> void:
 		_process_mantle(delta)
 		return
 
+	var climbing_allowed: bool = can_climb()
+	if not climbing_allowed:
+		_release_all_arms()
 	if stun_timer <= 0.0:
 		_apply_upright_balance()
-		_handle_arm_input()
-		_handle_wheel_input()
+		if climbing_allowed:
+			_handle_arm_input()
+			_handle_wheel_input()
 		_process_active_carry(delta)
 		_update_jetpack(delta)
 		_update_stretch(delta)
 		if ragdoll_active:
 			return
-		_apply_arm_forces()
+		if climbing_allowed:
+			_apply_arm_forces()
 		_apply_movement(delta, grounded)
 		_handle_jump(grounded)
 
@@ -1516,7 +1521,15 @@ func count_anchors() -> int:
 	return count
 
 
+## Only the Strong can grapple and winch. The Elastic creates the rope but
+## relies on being carried and thrown to gain altitude.
+func can_climb() -> bool:
+	return is_strong()
+
+
 func is_climbing() -> bool:
+	if not can_climb():
+		return false
 	return (left_anchor.anchored and not left_anchor.is_flat) or (right_anchor.anchored and not right_anchor.is_flat)
 
 
@@ -1564,6 +1577,8 @@ func set_character_type(value: int) -> void:
 	if not CharacterType.is_valid(value) or character_type == value:
 		return
 	character_type = value
+	if value == CharacterType.ELASTIC and is_node_ready():
+		_release_all_arms()
 	_apply_color()
 	_apply_character_type()
 	_refresh_visuals()
@@ -1641,6 +1656,9 @@ func _handle_arm_input() -> void:
 
 
 func _fire_arm(left: bool) -> void:
+	if not can_climb():
+		notice_requested.emit("ELASTIC CANNOT CLIMB - ASK STRONG TO THROW YOU")
+		return
 	if ragdoll_active or carried_by_peer > 0 or stun_timer > 0.0:
 		return
 	if _hands_full_with_bucket():

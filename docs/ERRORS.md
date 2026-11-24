@@ -679,3 +679,20 @@ applies the existing camera-direction `launch_from_carry()` impulse on the
 owning peer. `F` remains the gentle drop, the HUD advertises both keys while a
 teammate is held, and the Elastic tail ignores `Q` while that teammate is
 carried.
+
+## 31. Elastic could climb instead of relying on the Strong's throw
+
+**Symptom**
+
+The Elastic could fire grappling hands and winch up like the Strong, so the
+Strong's carry/throw duo mechanic was optional and the throw height felt weak.
+
+**Fix**
+
+`Climber.can_climb()` now gates all grapple, winch and mantle logic and returns
+true only for Strong. For an Elastic, `_process_climb()` releases any stale
+anchors and skips arm input/wheel/arm forces, while `_fire_arm()` emits an
+explicit "ELASTIC CANNOT CLIMB" notice. The Elastic still tensions its tail with
+`Q` so the Strong can climb it. `STRONG_THROW_UP` was raised from `11.0` to
+`22.0` with reduced forward speed, and the HUD marks the Elastic as
+`NO CLIMB`.

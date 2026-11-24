@@ -17,8 +17,9 @@ const RESPAWN_PENALTY := 5.0
 const FIX_REACH := 4.5
 const REVIVE_REACH := 4.6
 ## A Strong climber launches an awake Elastic passenger with this extra arc.
-const STRONG_THROW_FORWARD := 14.0
-const STRONG_THROW_UP := 11.0
+## An Elastic cannot climb, so the Strong's throw is the main way to gain height.
+const STRONG_THROW_FORWARD := 9.0
+const STRONG_THROW_UP := 22.0
 
 @onready var world_environment: WorldEnvironment = $WorldEnvironment
 @onready var sun: DirectionalLight3D = $DirectionalLight3D

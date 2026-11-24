@@ -66,15 +66,17 @@ on UDP port `7777`.
   The host is always Strong; guests alternate Elastic, Strong, Elastic in the
   order they join, so a two-player lobby always has both. A Strong climber can
   grab an awake Elastic teammate with `F`, carry them in both hands and press
-  `Q` (QWERTY) to throw them forward and high toward the direction the Strong
-  climber is looking; `F` puts them down gently. A nearby rope tail never steals
-  that `F` grab. Any class can carry a
-  downed teammate to safety, but an awake climber can only be lifted by a Strong
-  carrying an Elastic.
+  `Q` (QWERTY) to throw them high toward the direction the Strong climber is
+  looking; `F` puts them down gently. The Strong is the only climber: it hooks
+  hands and winches ropes. The Elastic cannot grapple or climb and must be
+  thrown upward by the Strong. A nearby rope tail never steals that `F` grab.
+  Any class can carry a downed teammate to safety, but an awake climber can only
+  be lifted by a Strong carrying an Elastic.
 - The **Elastic** climber owns a rope tail. Hold `Q` to stretch it into a long
   grappling line toward the camera; a Strong teammate can hook that line with a
-  hand and climb it. The Elastic pays stamina while the rope is stretched, and
-  the rope stops at the first wall instead of passing through it. Releasing `Q`
+  hand and climb it. The Elastic pays stamina while the rope is stretched but
+  cannot grapple, winch, mantle or climb, so it relies on Strong throws to rise.
+  The rope stops at the first wall instead of passing through it. Releasing `Q`
   drops any teammate grappling the rope, so slack cannot yank them through
   walls. The tail can also be grabbed with `F`, carried and thrown; it collides
   with the world (with swept collision) and flies briefly before returning to
@@ -126,8 +128,8 @@ The main menu opens first.
 | --- | --- |
 | Mouse | Look / aim |
 | W A S D | Move, swing, walk |
-| Left mouse | Fire left grappling hand |
-| Right mouse | Fire right grappling hand |
+| Left mouse | Fire left grappling hand (Strong only) |
+| Right mouse | Fire right grappling hand (Strong only) |
 | Space | Jump, release, mantle near a ledge |
 | Mouse wheel | Winch in / let out rope |
 | F | Grab or release the nearest free object, teammate or grappling tail |
@@ -175,7 +177,7 @@ The main menu opens first.
   dropping every anchor and carried object. There is no effort bar or carry slot
   readout. A downed teammate can be carried, dropped with `F`, and revived with
   `B` while holding a bandage. A Strong climber can also carry an awake Elastic
-  teammate and throw them high by pressing `F` again.
+  teammate and throw them high with `Q`; `F` only puts them down.
 - There is no manual arm-stretch button and no ball mode. `Q` is not an arm
   stretch: it tensions the Elastic rope tail only. The camera stays at head
   height and does not roll. A soft ground blob shadow replaces the long arm
