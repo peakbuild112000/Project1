@@ -40,6 +40,10 @@ player count only.
   - `player_data(peer_id: int) -> Dictionary`
 - Lobby snapshots carry only identity, colour and readiness. `Net` has no class
   assignment or class gating methods.
+- Every client sends `_rpc_register_name(player_name)` to the host on both ENet
+  and WebRTC connection. The host keeps an existing entry instead of replacing a
+  fast-arriving name with `Player <id>`, then broadcasts the corrected snapshot
+  so the lobby and HUD show the chosen name on every peer.
 
 ### WebRTC room (`scripts/network/web_rtc_room.gd`)
 
@@ -186,9 +190,11 @@ player count only.
   of the mountain and four spawn points at `x = -4.5, -1.5, 1.5, 4.5`,
   `y = 3.05`, `z = -2`. `_height_at()` flattens only the pocket under the pad and
   lets the natural base slope resume immediately, so there is no artificial
-  cliff at the entrance. `_build_start_holds()` guarantees seven grips along
-  that slope; low ribs and boulders skip the corridor. The camera starts at
-  `START_YAW = PI`, facing the summit.
+  cliff at the entrance. `_entrance_z_for_height()` places thirteen guaranteed
+  grips, spaced 2.5 m in altitude and alternating around `x = ±1.3`, so the
+  front face is climbable with the 14 m harpoon. Procedural ledges, ribs,
+  overhangs and boulders skip the whole `|x| < 8`, `z < 12`, `y < 42` corridor;
+  the camera starts at `START_YAW = PI`, facing the summit.
 - `_build_props()` places four trampolines at 28 m, 68 m, 96 m and 132 m.
   `_build_items()` places two jetpacks at 16 m and 82 m.
 - Checkpoints are at 26 m, 64 m and 104 m; `get_checkpoint_position(height)`

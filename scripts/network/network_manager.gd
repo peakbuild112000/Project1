@@ -213,12 +213,18 @@ func player_data(id: int) -> Dictionary:
 # ---------------------------------------------------------------------------
 
 func _on_multiplayer_peer_connected(id: int) -> void:
-	if _resetting or not is_host or id <= 1:
+	if _resetting or id <= 1:
+		return
+	if not is_host:
+		if id == 1:
+			_register_name_with_host()
 		return
 
 	if not _join_order.has(id):
 		_join_order.append(id)
-	players[id] = _make_player_entry(_default_name_for(id), id, false)
+	# A fast name RPC can arrive before this signal; keep the chosen name.
+	if not players.has(id):
+		players[id] = _make_player_entry(_default_name_for(id), id, false)
 	peer_connected.emit(id)
 
 	# The joining peer gets the complete snapshot first, then everyone else is
@@ -245,6 +251,12 @@ func _on_connected_to_server() -> void:
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
 	connected.emit()
 	lobby_changed.emit()
+	_register_name_with_host()
+
+
+func _register_name_with_host() -> void:
+	if is_host or peer_id <= 0 or multiplayer.multiplayer_peer == null:
+		return
 	rpc_id(1, "_rpc_register_name", player_name)
 
 
@@ -289,6 +301,10 @@ func _rpc_register_name(requested_name: String) -> void:
 	if entry["name"].is_empty():
 		entry["name"] = _default_name_for(sender)
 	players[sender] = entry
+	# The first lobby snapshot was sent before this RPC arrived, so push the
+	# chosen name to every peer and refresh the local lobby immediately.
+	lobby_changed.emit()
+	_broadcast_lobby()
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -370,6 +386,8 @@ func _on_web_room_ready(assigned_id: int, room: String) -> void:
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
 	connected.emit()
 	lobby_changed.emit()
+	if not is_host:
+		_register_name_with_host()
 
 
 func _on_web_room_failed(message: String) -> void:

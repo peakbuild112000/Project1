@@ -97,6 +97,27 @@ func _initialize() -> void:
 		var height := float(level_node.call("_height_at", 0.0, z))
 		check(absf(height - last_height) < 20.0, "Unclimbable wall in the entrance at z=%d" % int(z))
 		last_height = height
+	var holds: Array[Node] = []
+	for child in level_node.get_children():
+		if str(child.name).begins_with("EntranceHold_"):
+			holds.append(child)
+	check(holds.size() >= 10, "Entrance route has too few guaranteed grips")
+	holds.sort_custom(func(a: Node, b: Node) -> bool:
+		return (a as Node3D).position.y < (b as Node3D).position.y)
+	var previous_y := 3.05
+	for hold in holds:
+		var hold_pos: Vector3 = (hold as Node3D).position
+		check(hold_pos.y - previous_y <= 6.0, "Entrance route has an unreachable vertical gap")
+		previous_y = hold_pos.y
+	for child in level_node.get_children():
+		if not (child is StaticBody3D):
+			continue
+		var child_name := str(child.name)
+		if child_name == "ProceduralMountain" or child_name.begins_with("EntranceHold_") or child_name.begins_with("EntranceRest_"):
+			continue
+		var block_pos: Vector3 = (child as StaticBody3D).position
+		check(not (absf(block_pos.x) < 8.0 and block_pos.z > -2.0 and block_pos.z < 12.0 and block_pos.y < 34.0),
+			"A generated wall blocks the entrance: %s" % child_name)
 
 	game.call("_authorize_item", 1, "jetpack_0")
 	await process_frame

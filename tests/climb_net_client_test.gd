@@ -41,6 +41,8 @@ func _process(delta: float) -> bool:
 		1:
 			if net.peer_id > 0 or timer > 8.0:
 				print("CLIENT peer=", net.peer_id, " roster=", net.players.keys())
+				for id in net.players.keys():
+					print("CLIENT name ", id, "=", str(net.player_data(int(id)).get("name", "?")))
 				step = 2
 				timer = 0.0
 		2:
@@ -54,6 +56,8 @@ func _process(delta: float) -> bool:
 				quit(1)
 		3:
 			if timer > 2.0:
+				for id in net.players.keys():
+					print("CLIENT final name ", id, "=", str(net.player_data(int(id)).get("name", "?")))
 				var game := root.get_node_or_null("Game")
 				var local_id: int = net.peer_id
 				var climber = game.get_node("Players").get_node("Climber_%d" % local_id)

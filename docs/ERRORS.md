@@ -857,7 +857,40 @@ The pad returned to the natural foot of the mountain at `z = -2`, raised to
 `y = 2.0` so its top is `2.2` and racers spawn at `y = 3.05`. Its depth was
 reduced to 4 m. The flatten band now only covers the pocket under the pad
 (`z = -4..0`) and releases by `z = 2`, so heights rise continuously:
-1 m at `z = 0`, 12.6 m at `z = 2`, 22.9 m at `z = 4`. `_build_start_holds()`
-adds seven guaranteed grips along that first slope, while vertical ribs and
-boulders still skip the entrance corridor. Validation now rejects any height
-jump over 20 m between consecutive 2 m samples in the entrance.
+1 m at `z = 0`, 12.6 m at `z = 2`, 22.9 m at `z = 4`. Validation now rejects
+any height jump over 20 m between consecutive 2 m samples in the entrance. The
+generated obstacles on that slope were removed in section 39.
+
+## 39. Generated ribs walled off the entrance and joiners got a random name
+
+**Symptom**
+
+Racers still could not enter the mountain: vertical wall ribs and ledges from
+the procedural route sat across the lower front face. Separately, a player who
+joined saw the name `Player 41646665` instead of the display name typed in the
+menu.
+
+**Cause**
+
+`_build_mountain_routes()` only skipped low holds below `y = 8` near `z < 2`.
+Ribs 6.2 m tall and their overhangs were placed from `y = 4` upward, so they
+formed a literal barrier in front of the guaranteed holds. The boulder exclusion
+zone was equally short. On the network side, only ENet clients called
+`_rpc_register_name()`. WebRTC clients never sent the RPC; the host therefore
+kept the placeholder `_default_name_for(id)`, which is `Player <peer id>`. A
+race between that placeholder entry and a fast-arriving name RPC could also
+overwrite the real name.
+
+**Fix**
+
+The whole entrance corridor (`|x| < 8`, `z < 12`, `y < 42`) is now reserved for
+the climb: ledges, ribs, overhangs and boulders skip it. `_build_start_holds()`
+places thirteen grips with `_entrance_z_for_height()`, spaced 2.5 m in altitude
+and alternating around `x = ±1.3`, with rest ledges every third grip. Smoke
+validation now checks the grip spacing and rejects any generated wall in that
+corridor.
+
+Both ENet and WebRTC clients now call `_register_name_with_host()`. The host
+preserves an existing name when `peer_connected` arrives late and broadcasts the
+corrected roster, so the lobby, leaderboard and climbers all use the chosen
+display name.

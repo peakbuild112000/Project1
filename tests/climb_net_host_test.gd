@@ -35,17 +35,24 @@ func _process(delta: float) -> bool:
 			net.create_server("Host", 4, 7792)
 			print("HOST peer=", net.peer_id, " host=", net.is_host)
 			net.match_started.connect(func() -> void: print("HOST match_started"))
+			net.lobby_changed.connect(func() -> void:
+				for id in net.players.keys():
+					print("HOST lobby ", id, "=", str(net.player_data(int(id)).get("name", "?"))))
 			step = 1
 		return false
 	match step:
 		1:
-			if net.players.size() >= 2 or timer > 8.0:
+			if net.players.size() >= 2:
 				print("HOST roster=", net.players.keys())
+				for id in net.players.keys():
+					print("HOST name ", id, "=", str(net.player_data(int(id)).get("name", "?")))
 				net.start_match()
 				step = 2
 				timer = 0.0
 		2:
 			if timer > 8.0:
+				for id in net.players.keys():
+					print("HOST final name ", id, "=", str(net.player_data(int(id)).get("name", "?")))
 				_report("HOST")
 				var game := root.get_node_or_null("Game")
 				if game != null:
