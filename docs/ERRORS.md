@@ -785,11 +785,12 @@ and tutorial signs, and the tests and docs still asserted the old contract.
   `altitude * 10 - penalty`. `_handle_death()` adds `RESPAWN_PENALTY = 5.0`
   seconds and respawns at the last checkpoint; lives, spectators and health
   were removed.
-- `LevelGenerator` builds a flat start pad at `(0, 0.9, -2)` with four evenly
-  spaced spawn points at `y = 1.95`. The mountain profile flattens the same
-  band, so nobody begins on a slope or inside the rock. The cabin, mission
-  sign, bucket, crates, planks and control drawings were removed. Only four
-  trampolines, two jetpacks, three checkpoints, enemies and the summit remain.
+- `LevelGenerator` builds a flat start pad at `(0, 0.9, 2)` on the lower shoulder
+  of the mountain with four evenly spaced spawn points at `y = 1.95`. The
+  mountain profile flattens the same band, so nobody begins on a slope or
+  outside the rock. The cabin, mission sign, bucket, crates, planks and control
+  drawings were removed. Only four trampolines, two jetpacks, three checkpoints,
+  enemies and the summit remain.
 - `prop.gd` is a static trampoline-only boost pad with a bounce `Area3D`.
   `item_pickup.gd` only grants jetpack fuel. `Climber` keeps grapple hands,
   stamina, ragdoll stumbles, feet, camera, jetpack and fall dynamics; carry,
@@ -810,3 +811,27 @@ and tutorial signs, and the tests and docs still asserted the old contract.
   `_process_climb()`, which produced `Parse Error: Expected statement, found
   "Indent"` at `climber.gd:793`. The indentation was repaired and headless
   import now completes without script errors.
+
+## 37. Racers spawned outside the mountain and the route was hard to read
+
+**Symptom**
+
+At the start of a race the climbers appeared next to the mountain instead of on
+it, and the mountain face was dim enough that the upper route was hard to see.
+
+**Cause**
+
+The start pad sat at `z = -2`, just outside the mountain footprint which begins
+near `z = -3`. The first-person camera also started at yaw `0`, looking along
+`-Z` away from the summit at `z = 16`. The directional light was angled low
+(`-43°`) and the exponential fog density was `0.0045`, so the 142 m route faded
+into shadow and haze.
+
+**Fix**
+
+The start pad and spawn points moved to `z = 2` on the lower shoulder, and
+`_height_at()` flattens `z = -4..8` so the pad stays level. Low ledges, ribs and
+boulders now skip the wider start corridor. `PlayerCamera.setup_local()` starts
+at `START_YAW = PI`, so every racer looks straight at the summit. The sun is
+placed at `y = 180` with a steep `-86°` angle, the shadow range was raised to
+260 m and fog density dropped to `0.0025`, making the whole climb visible.

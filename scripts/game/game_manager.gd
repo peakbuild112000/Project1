@@ -117,7 +117,7 @@ func _setup_environment() -> void:
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	environment.fog_light_color = Color(0.36, 0.43, 0.58)
-	environment.fog_density = 0.0045
+	environment.fog_density = 0.0025
 	environment.fog_sun_scatter = 0.35
 	environment.glow_enabled = true
 	environment.glow_intensity = 0.35
@@ -126,11 +126,14 @@ func _setup_environment() -> void:
 
 
 func _setup_light() -> void:
-	sun.light_color = Color(1.0, 0.93, 0.8)
-	sun.light_energy = 1.9
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.light_energy = 2.0
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 240.0
-	sun.rotation_degrees = Vector3(-43.0, 37.0, 0.0)
+	sun.directional_shadow_max_distance = 260.0
+	# Put the sun high above the summit so the whole route is readable and the
+	# mountain does not hide itself in its own shadow.
+	sun.global_position = Vector3(0.0, 180.0, 16.0)
+	sun.rotation_degrees = Vector3(-86.0, 20.0, 0.0)
 
 
 func _has_network() -> bool:

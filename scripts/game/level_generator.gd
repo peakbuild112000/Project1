@@ -161,11 +161,12 @@ func _add_hazard(pos: Vector3, size: Vector3, kind: int, hazard_label: String) -
 
 func _build_base() -> void:
 	_add_box(Vector3(0, -0.5, MOUNTAIN_CENTER_Z), Vector3(52, 3, 52), _base_material)
-	# Flat race start pad at the foot of the mountain.
-	_add_box(Vector3(0, 0.9, -2.0), Vector3(16, 0.4, 12), _accent_material)
+	# Flat race start pad on the lower shoulder of the mountain, so racers
+	# begin on the route instead of outside its silhouette.
+	_add_box(Vector3(0, 0.9, 2.0), Vector3(16, 0.4, 12), _accent_material)
 	var x_positions: Array[float] = [-4.5, -1.5, 1.5, 4.5]
 	for x in x_positions:
-		spawn_points.append(Vector3(x, 1.95, -2.0))
+		spawn_points.append(Vector3(x, 1.95, 2.0))
 
 
 func _height_at(x: float, z: float) -> float:
@@ -183,7 +184,7 @@ func _height_at(x: float, z: float) -> float:
 	) * clampf(t * 1.7, 0.0, 1.0)
 	var height := 1.0 + profile + ridges
 	# Flat race start pad so nobody begins on a slope.
-	var start_band := smoothstep(-8.0, -5.0, z) * (1.0 - smoothstep(1.0, 4.0, z))
+	var start_band := smoothstep(-7.0, -4.0, z) * (1.0 - smoothstep(8.0, 11.0, z))
 	var start_width := 1.0 - smoothstep(5.0, 9.0, absf(x))
 	height = lerpf(height, 1.0, start_band * start_width)
 	if distance < 2.6:
@@ -281,7 +282,7 @@ func _build_mountain_routes() -> void:
 				rng.randf_range(0.7, 1.9)
 			)
 			# Keep the race start pad free of low holds.
-			if pos.y < 10.0 and absf(pos.x) < 7.0 and pos.z < 5.0:
+			if pos.y < 10.0 and absf(pos.x) < 7.0 and pos.z < 9.0:
 				continue
 			var width := rng.randf_range(lerpf(4.2, 2.2, difficulty), lerpf(5.4, 3.0, difficulty))
 			var depth := rng.randf_range(lerpf(3.2, 1.6, difficulty), lerpf(4.2, 2.4, difficulty))
@@ -309,7 +310,7 @@ func _build_mountain_routes() -> void:
 		if i % 2 == 1:
 			var rib_angle := base_angle + 0.9
 			var rib := _mountain_point(y - 1.0, rib_angle, 0.2)
-			if rib.y < 10.0 and absf(rib.x) < 7.0 and rib.z < 5.0:
+			if rib.y < 10.0 and absf(rib.x) < 7.0 and rib.z < 9.0:
 				continue
 			_add_box(
 				rib, Vector3(0.65, 6.2, 2.6), _wall_material, null,
@@ -346,7 +347,7 @@ func _build_rocks() -> void:
 		var x := cos(angle) * radius
 		var z := MOUNTAIN_CENTER_Z + sin(angle) * radius
 		# Keep the race start pad clear of boulders.
-		if absf(x) < 7.0 and z > -9.0 and z < 5.0:
+		if absf(x) < 7.0 and z > -9.0 and z < 9.0:
 			continue
 		var rock_point := Vector3(x, _height_at(x, z) + 0.4, z)
 		var holder := _instance_model(MODEL_ROCK)

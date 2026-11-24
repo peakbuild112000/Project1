@@ -11,7 +11,7 @@ script = ExtResource("1_game")
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1616729675]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=382511607]
-transform = Transform3D(1, 0, 0, 0, -4.371139e-08, 1, 0, -1, -4.371139e-08, 0, 10.219754, 0)
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 180, 16)
 
 [node name="Level" type="Node3D" parent="." unique_id=2132687473]
 script = ExtResource("2_level")

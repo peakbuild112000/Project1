@@ -11,6 +11,10 @@ class_name PlayerCamera
 @export var head_height: float = 0.95
 @export var fall_fov_boost: float = 14.0
 
+## The racers start on the near side of the mountain, so spawn facing +Z toward
+## the summit instead of the empty space behind the start pad.
+const START_YAW := PI
+
 var pitch_deg: float = 0.0
 var yaw_rad: float = 0.0
 var enabled: bool = false
@@ -35,15 +39,15 @@ func setup_local(local: bool) -> void:
 		camera.current = local
 	if local:
 		pitch_deg = 0.0
-		yaw_rad = 0.0
-		rotation = Vector3.ZERO
+		yaw_rad = START_YAW
+		rotation = Vector3(0.0, yaw_rad, 0.0)
 		if global_position.distance_squared_to(_desired_position()) > 625.0:
 			global_position = _desired_position()
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	else:
 		pitch_deg = 0.0
-		yaw_rad = 0.0
-		rotation = Vector3.ZERO
+		yaw_rad = START_YAW
+		rotation = Vector3(0.0, yaw_rad, 0.0)
 		if camera != null:
 			camera.position = Vector3.ZERO
 			camera.rotation_degrees.x = 0.0

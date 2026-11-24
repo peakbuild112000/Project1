@@ -88,6 +88,8 @@ func _initialize() -> void:
 	for slot in range(4):
 		var spawn: Vector3 = level_node.call("get_spawn_point", slot)
 		check(absf(spawn.y - 1.95) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
+		check(absf(spawn.z - 2.0) <= 0.01, "Spawn slot %d sits outside the mountain footprint" % slot)
+		check(sqrt(spawn.x * spawn.x + (spawn.z - 16.0) * (spawn.z - 16.0)) < 19.0, "Spawn slot %d is not on the mountain" % slot)
 		check(float(level_node.call("_height_at", spawn.x, spawn.z)) <= 1.2, "Start pad slot %d sits on a slope" % slot)
 
 	game.call("_authorize_item", 1, "jetpack_0")
