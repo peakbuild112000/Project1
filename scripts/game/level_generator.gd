@@ -578,7 +578,7 @@ func _build_control_drawings() -> void:
 	_icon(_tutorial, Vector3(2.1, 0.8, 0.0), Vector3(0.8, 0.8, 0.12), _brittle_material)
 	_icon(_tutorial, Vector3(1.55, 0.8, 0.0), Vector3(0.12, 0.5, 0.1), _hold_material)
 	_icon(_tutorial, Vector3(2.65, 0.8, 0.0), Vector3(0.12, 0.5, 0.1), _hold_material)
-	_caption(_tutorial, "GRAB / DROP", Vector3(1.15, -0.35, 0.0))
+	_caption(_tutorial, "CARRY / Q THROW", Vector3(1.15, -0.35, 0.0))
 
 	_icon(_tutorial, Vector3(4.2, 0.85, 0.0), Vector3(0.55, 1.0, 0.12), _hold_material)
 	_icon(_tutorial, Vector3(4.2, 0.1, 0.0), Vector3(0.35, 0.5, 0.1), _checkpoint_material, Vector3(0, 0, 0.25))

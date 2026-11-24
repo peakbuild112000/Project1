@@ -515,6 +515,14 @@ func _authorize_carry(carrier_pid: int, kind: int, target_id: String) -> void:
 
 	_apply_carry_link(carrier_pid, kind, target_id)
 	_broadcast_carry_link(carrier_pid, kind, target_id)
+	if kind == 1:
+		var carry_source: Node = _find_climber_by_id(carrier_pid)
+		var carry_target: Node = _find_climber_by_id(int(target_id))
+		if (
+			is_strong_climber(carry_source) and is_elastic_climber(carry_target)
+			and not bool(carry_target.get("unconscious"))
+		):
+			_notify("ELASTIC HELD - Q TO THROW / F TO PUT DOWN")
 
 
 ## Coop build step: one climber carries a plank or crate while a teammate
