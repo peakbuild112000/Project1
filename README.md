@@ -62,18 +62,22 @@ on UDP port `7777`.
 - The bucket can be carried with `F`, pushed with the body, or hooked with either
   hand. Pulling it sideways tips it and spills water. Carrying it uses both
   hands visibly.
-- Two character classes are chosen in the lobby: **Strong** and **Elastic**.
-  A Strong climber can grab an awake Elastic teammate with `F`, carry them and
-  press `F` again to throw them forward and high toward the direction the Strong
-  climber is looking. Any class can carry a downed teammate to safety, but an
-  awake climber can only be lifted by a Strong carrying an Elastic.
+- Two character classes are assigned automatically: **Strong** and **Elastic**.
+  The host is always Strong; guests alternate Elastic, Strong, Elastic in the
+  order they join, so a two-player lobby always has both. A Strong climber can
+  grab an awake Elastic teammate with `F`, carry them and press `F` again to
+  throw them forward and high toward the direction the Strong climber is
+  looking. A nearby rope tail never steals that `F` grab. Any class can carry a
+  downed teammate to safety, but an awake climber can only be lifted by a Strong
+  carrying an Elastic.
 - The **Elastic** climber owns a rope tail. Hold `Q` to stretch it into a long
   grappling line toward the camera; a Strong teammate can hook that line with a
   hand and climb it. The Elastic pays stamina while the rope is stretched, and
-  the rope stops at the first wall instead of passing through it. The tail can
-  also be grabbed with `F`, carried and thrown; it collides with the world and
-  flies briefly before returning to its owner. Strong climbers have no usable
-  rope tail.
+  the rope stops at the first wall instead of passing through it. Releasing `Q`
+  drops any teammate grappling the rope, so slack cannot yank them through
+  walls. The tail can also be grabbed with `F`, carried and thrown; it collides
+  with the world (with swept collision) and flies briefly before returning to
+  its owner. Strong climbers have no usable rope tail.
 - A downed teammate has a death countdown, which pauses while carried, but they
   stay down until someone spends a bandage on them. Feet are animated, and
   walking and jumping work even when both hands are occupied. The bucket is held
@@ -112,8 +116,8 @@ The main menu opens first.
 - LAN works out of the box. Online play needs port forwarding or a tunnel for
   UDP port `7777`, or any port selected in the menu.
 - The match needs both classes at the table: at least one **Strong** and one
-  **Elastic**. If everyone picked the same class, START MATCH stays disabled and
-  the host is told why.
+  **Elastic**. Classes are automatic, so START MATCH unlocks as soon as a second
+  player joins; the host is told why if a lobby is still too small.
 
 ## Controls
 

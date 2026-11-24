@@ -594,3 +594,38 @@ really moves it. `last_launch_velocity` stores the applied value so validation
 is independent of frozen-body physics timing. The throw vector also flattens
 camera pitch, and the smoke test zeroes a falling carrier before releasing so
 the expected arc is deterministic.
+
+## 28. Slack/yanked rope, missed F grab and manual class selection
+
+**Symptom**
+
+A teammate could pass through a wall when the Elastic let the rope tail go; a
+thrown tail could still skip thin rock; a Strong standing next to an Elastic
+sometimes grabbed the tail with `F` instead of the teammate, so the high throw
+never happened. Players also had to pick their class manually.
+
+**Cause**
+
+The tensioned tail is a frozen kinematic body whose transform snaps back to the
+owner when `Q` is released. A grappling teammate's anchor kept pointing at that
+body, so the snap applied a huge pull toward the owner through any intervening
+wall. The released tail was a thin fast capsule without swept collision. The
+`F` raycast scanned layer 4 (tails/props) before layer 2 (climbers), and the
+fallback loop checked tails before eligible climbers, so the nearer rope won.
+Class choice was a local UI value transported by `_rpc_register_character()`.
+
+**Fix**
+
+`TailRope._release_grapplers()` runs on both the owner and the remote peers
+through `rpc_apply_tension()`; `Climber.release_tail_anchor()` drops only arms
+anchored to that tail owner before the snap. The final slack is additionally
+sent with the reliable `rpc_release_tail_slack(version)` because the throttled
+tension stream is unreliable; monotonic versions stop an old packet from
+cancelling a newer tension. A thrown tail now keeps layer 4 for
+grapples, adds world layer 1 with mask 1, and uses `CCD_MODE_CAST_SHAPE`.
+`Climber._request_carry()` checks climbers before tails in both the raycast and
+fallback paths. Classes are now host-assigned by `Net.assign_character_types()`:
+host Strong, guests alternate Elastic/Strong/Elastic by join order; the manual
+selector and `_rpc_register_character()` are removed. Validation and gameplay
+smoke tests cover the auto roster, slack-rope release, thrown-tail collision,
+and `F` priority; the two-process ENet harness confirms auto classes.

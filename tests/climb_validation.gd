@@ -41,11 +41,36 @@ func _initialize() -> void:
 	check(net != null, "Net autoload missing")
 	if net != null:
 		check(not net.has_method("start_solo"), "Solo match entry point must be removed")
-		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "set_character_type", "has_both_classes"]:
+		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "has_both_classes", "class_for_join_index", "assign_character_types"]:
 			check(net.has_method(method), "Net missing method: " + method)
+		check(not net.has_method("set_character_type"), "Manual class setter must be removed")
+		check(int(net.call("class_for_join_index", 0)) == CharacterType.ELASTIC, "First guest must be Elastic")
+		check(int(net.call("class_for_join_index", 1)) == CharacterType.STRONG, "Second guest must be Strong")
+		check(int(net.call("class_for_join_index", 2)) == CharacterType.ELASTIC, "Third guest must be Elastic")
+		var saved_players: Dictionary = net.get("players")
+		var saved_join_order: Array = net.get("_join_order")
+		var saved_is_host: bool = bool(net.get("is_host"))
+		var saved_host_peer: int = int(net.get("peer_id"))
+		var auto_roster: Dictionary[int, Dictionary] = {}
+		auto_roster[1] = {"name": "Host", "character_type": CharacterType.ELASTIC}
+		auto_roster[2] = {"name": "Guest A", "character_type": CharacterType.STRONG}
+		auto_roster[3] = {"name": "Guest B", "character_type": CharacterType.STRONG}
+		net.set("players", auto_roster)
+		var guest_order: Array[int] = [2, 3]
+		net.set("_join_order", guest_order)
+		net.set("is_host", true)
+		net.set("peer_id", 1)
+		net.call("assign_character_types")
+		check(int((net.get("players")[1] as Dictionary).get("character_type", -1)) == CharacterType.STRONG, "Host was not forced to Strong")
+		check(int((net.get("players")[2] as Dictionary).get("character_type", -1)) == CharacterType.ELASTIC, "First guest was not forced to Elastic")
+		check(int((net.get("players")[3] as Dictionary).get("character_type", -1)) == CharacterType.STRONG, "Second guest was not forced to Strong")
+		check(int(net.get("character_type")) == CharacterType.STRONG, "Local class mirror was not updated")
+		net.set("players", saved_players)
+		net.set("_join_order", saved_join_order)
+		net.set("is_host", saved_is_host)
+		net.set("peer_id", saved_host_peer)
 		check(net.has_signal("match_start_rejected"), "Net missing match_start_rejected signal")
 		# A lobby where everyone picked the same class cannot start a match.
-		var saved_players: Dictionary = net.get("players")
 		var same_class: Dictionary[int, Dictionary] = {}
 		same_class[1] = {"character_type": CharacterType.STRONG}
 		same_class[2] = {"character_type": CharacterType.STRONG}
@@ -65,7 +90,7 @@ func _initialize() -> void:
 	if climber_scene != null:
 		var climber := climber_scene.instantiate() as Node
 		root.add_child(climber)
-		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry", "rpc_carry_launch"]:
+		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry", "rpc_carry_launch", "release_tail_anchor", "_request_carry"]:
 			check(climber.has_method(method), "Climber missing method: " + method)
 		for prop in ["peer_id", "display_name", "player_color", "character_type", "current_stamina", "max_stamina", "stamina_lock", "stretch", "ragdoll_active", "unconscious", "persistent_unconscious", "unconscious_time", "death_progress", "fall_time", "highest_y", "checkpoint_y", "is_local", "injury", "bandages"]:
 			check(climber.get(prop) != null or climber.get_property_list().any(func(p): return p.name == prop), "Climber missing property: " + prop)
@@ -84,6 +109,9 @@ func _initialize() -> void:
 		if tail != null:
 			check(tail.has_method("set_carrier"), "Tail cannot be carried")
 			check(tail.has_method("can_be_grappled"), "Tail cannot be grappled")
+			check(tail.has_method("set_tension"), "Tail cannot be tensioned")
+			check(tail.has_method("rpc_release_tail_slack"), "Reliable rope slack release missing")
+			check(int(tail.get("tension_version")) >= 0, "Tail tension has no version")
 		check(climber.has_method("_hands_full_with_bucket"), "Bucket two-hand hold missing")
 		check(float(climber.get("unconscious_death_time")) > 0.0, "Unconscious death timer missing")
 		check(int(climber.get("character_type")) == CharacterType.STRONG, "Climbers default to Strong")

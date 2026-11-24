@@ -41,6 +41,9 @@ func _initialize() -> void:
 	check(climber2 != null, "Climber_2 missing")
 
 	# Two classes: Strong carries/throws, Elastic owns a rope tail.
+	var tail2: Node = null
+	if climber2 != null:
+		tail2 = climber2.find_child("Tail", true, false)
 	if climber1 != null and climber2 != null:
 		check(int(climber1.get("character_type")) == CharacterType.STRONG, "Host is not Strong")
 		check(int(climber2.get("character_type")) == CharacterType.ELASTIC, "Guest is not Elastic")
@@ -49,7 +52,6 @@ func _initialize() -> void:
 		check(int(state1.get("character_type", -1)) == CharacterType.STRONG, "Strong type not replicated in state")
 		check(int(state2.get("character_type", -1)) == CharacterType.ELASTIC, "Elastic type not replicated in state")
 		var tail1: Node = climber1.find_child("Tail", true, false)
-		var tail2: Node = climber2.find_child("Tail", true, false)
 		check(tail1 != null, "Strong climber missing tail node")
 		check(tail2 != null, "Elastic climber missing tail node")
 		if tail1 != null:
@@ -72,7 +74,17 @@ func _initialize() -> void:
 			tail2.call("set_tension", true, Vector3.FORWARD, 13.0)
 			var clamped: float = float(tail2.get("tension_length"))
 			check(clamped > 0.0 and clamped < 5.0, "Rope crossed the wall (length=%.2f)" % clamped)
+			var teammate_arm: Object = climber1.get("left_anchor")
+			teammate_arm.set("anchored", true)
+			teammate_arm.set("body", tail2)
 			tail2.call("set_tension", false, Vector3.FORWARD, 0.0)
+			check(not bool(teammate_arm.get("anchored")), "Slack rope kept a teammate grappled through a wall")
+			tail2.call("set_carrier", 1)
+			tail2.call("set_carrier", 0, Vector3(0.0, 4.5, -12.0))
+			check((int(tail2.get("collision_layer")) & 1) != 0, "Thrown tail is not on the world layer")
+			check((int(tail2.get("collision_mask")) & 1) != 0, "Thrown tail does not scan the world layer")
+			check(bool(tail2.get("continuous_cd")), "Thrown tail has no swept collision")
+			tail2.call("_reset_to_owner")
 			wall.queue_free()
 
 	check(int(game.get("_phase")) == 0, "Expected countdown phase")
@@ -181,6 +193,17 @@ func _initialize() -> void:
 		game.call("_authorize_item", 1, "jetpack_0")
 		await process_frame
 		check(bool(climber1.get("has_jetpack")), "Jetpack not equipped")
+
+		# A nearby tail must not steal F from an awake Elastic: the Strong needs
+		# the teammate itself for the high throw.
+		var saved_camera: Node = climber1.camera_pivot
+		climber1.camera_pivot = null
+		climber1.set("global_position", climber2.global_position + Vector3(1.1, 0.0, 0.0))
+		tail2.global_position = climber1.global_position + Vector3(0.15, 0.0, 0.0)
+		climber1.call("_request_carry")
+		check(int(climber1.get("carry_kind")) == 1, "Strong grabbed the tail instead of the Elastic")
+		game.call("request_drop")
+		climber1.camera_pivot = saved_camera
 
 		# An awake Elastic can be carried by a Strong, then thrown higher.
 		game.call("request_carry", 1, "2")

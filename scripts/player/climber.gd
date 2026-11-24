@@ -1111,7 +1111,9 @@ func _request_carry() -> void:
 	if world != null and camera != null:
 		var from: Vector3 = camera.global_position
 		var direction: Vector3 = -camera.global_transform.basis.z.normalized()
-		for query_mask in [4, 2]:
+		# Check climbers before tails: a Strong standing next to an Elastic
+		# must grab the teammate for the high throw, not the nearby rope tail.
+		for query_mask in [2, 4]:
 			var query := PhysicsRayQueryParameters3D.create(from, from + (direction * carry_reach), query_mask, [])
 			query.exclude = _ray_exclusions()
 			var hit := world.direct_space_state.intersect_ray(query)
@@ -1136,6 +1138,17 @@ func _request_carry() -> void:
 				target_id = str(int(collider.get("peer_id")))
 				best_distance = distance
 
+	# Fallback: an eligible climber wins over a tail so the signature throw is
+	# always reachable with F. The tail stays available when nobody is liftable.
+	if kind == -1:
+		for climber in get_tree().get_nodes_in_group("climbers"):
+			if int(climber.get("carried_by_peer")) > 0 or not can_carry_climber(climber):
+				continue
+			var distance := global_position.distance_to(climber.global_position)
+			if distance < carry_reach and distance < best_distance:
+				kind = 1
+				target_id = str(int(climber.get("peer_id")))
+				best_distance = distance
 	if kind == -1:
 		for tail in get_tree().get_nodes_in_group("climb_tails"):
 			var owner_id := int(tail.get("owner_peer_id"))
@@ -1157,14 +1170,6 @@ func _request_carry() -> void:
 				kind = 0
 				target_id = str(prop.get("prop_id"))
 				best_distance = distance
-	for climber in get_tree().get_nodes_in_group("climbers"):
-		if int(climber.get("carried_by_peer")) > 0 or not can_carry_climber(climber):
-			continue
-		var distance := global_position.distance_to(climber.global_position)
-		if distance < carry_reach and distance < best_distance:
-			kind = 1
-			target_id = str(int(climber.get("peer_id")))
-			best_distance = distance
 
 	if kind == -1:
 		notice_requested.emit("NOTHING TO GRAB")
@@ -1689,6 +1694,23 @@ func _release_arm(left: bool) -> void:
 func _release_all_arms() -> void:
 	_release_arm(true)
 	_release_arm(false)
+
+
+## Called by a tail owner when its rope goes slack. A grapple on that rope is
+## dropped immediately; otherwise the tail snaps back to its owner and yanks a
+## teammate through whatever wall the rope was wrapped around.
+func release_tail_anchor(owner_pid: int) -> void:
+	for side in [true, false]:
+		var arm: ArmAnchor = left_anchor if side else right_anchor
+		if not arm.anchored or arm.body == null:
+			continue
+		if not arm.body.has_method("get_tail_owner_id"):
+			continue
+		if int(arm.body.call("get_tail_owner_id")) != owner_pid:
+			continue
+		_release_arm(side)
+		if is_local:
+			notice_requested.emit("ROPE SLACK")
 
 
 func _apply_arm_forces() -> void:

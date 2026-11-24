@@ -2,6 +2,9 @@
 .godot/
 /android/
 
+# Separate PHANTOM project (own Git repository)
+/phantom-loop/
+
 # Signaling relay dependencies
 tools/node_modules/
 tools/package-lock.json

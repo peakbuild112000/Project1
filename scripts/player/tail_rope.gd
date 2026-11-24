@@ -26,6 +26,10 @@ var tension_direction: Vector3 = Vector3.FORWARD
 var tension_length: float = 0.0
 var _return_timer: float = 0.0
 var _tension_send_timer: float = 0.0
+## Monotonic state version. A reliable slack packet must not cancel a newer
+## tension that started while an older unreliable packet was in flight.
+var tension_version: int = 0
+var _last_applied_version: int = -1
 
 
 func _ready() -> void:
@@ -34,6 +38,7 @@ func _ready() -> void:
 	gravity_scale = 0.0
 	collision_layer = 4 if elastic else 0
 	collision_mask = 0
+	continuous_cd = false
 	freeze = true
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	_apply_color(Color(0.35, 0.75, 1.0))
@@ -82,22 +87,48 @@ func set_tension(active: bool, direction: Vector3 = Vector3.FORWARD, length: flo
 			next_direction = direction.normalized()
 		next_length = clampf(length, 0.05, max_tension_length)
 		next_length = _clamp_length_to_walls(next_direction, next_length)
+	var was_tensioned := tensioned
 	var changed: bool = active != tensioned
+	if changed:
+		tension_version += 1
 	_apply_tension(active, next_direction, next_length)
+	if was_tensioned and not tensioned:
+		_release_grapplers()
+		if is_multiplayer_authority():
+			var api: MultiplayerAPI = get_multiplayer()
+			# The final slack message is reliable: losing it used to leave a
+			# teammate grappled to a rope that snapped back through a wall.
+			if api != null and api.multiplayer_peer != null:
+				rpc("rpc_release_tail_slack", tension_version)
 	if changed:
 		_tension_send_timer = 0.0
 	if is_multiplayer_authority() and (_tension_send_timer <= 0.0 or changed):
 		var api: MultiplayerAPI = get_multiplayer()
 		if api != null and api.multiplayer_peer != null:
-			rpc("rpc_apply_tension", tensioned, tension_direction, tension_length)
+			rpc("rpc_apply_tension", tensioned, tension_direction, tension_length, tension_version)
 		_tension_send_timer = TENSION_SEND_INTERVAL
 
 
 @rpc("authority", "call_remote", "unreliable")
-func rpc_apply_tension(active: bool, direction: Vector3, length: float) -> void:
-	if not elastic:
+func rpc_apply_tension(active: bool, direction: Vector3, length: float, version: int) -> void:
+	if not elastic or version < _last_applied_version:
 		return
+	_last_applied_version = version
+	var was_tensioned := tensioned
 	_apply_tension(active, direction, length)
+	if was_tensioned and not tensioned:
+		_release_grapplers()
+
+
+## Reliable companion to the throttled tension stream. Older packets are
+## ignored so a delayed slack cannot cancel a newer pull.
+@rpc("authority", "call_remote", "reliable")
+func rpc_release_tail_slack(version: int) -> void:
+	if not elastic or version < _last_applied_version:
+		return
+	_last_applied_version = version
+	_apply_tension(false, Vector3.FORWARD, 0.0)
+	_release_grapplers()
 
 
 ## A kinematic rope can be placed anywhere, so the owner raycasts along the
@@ -123,6 +154,17 @@ func _clamp_length_to_walls(direction: Vector3, length: float) -> float:
 	return clampf(origin.distance_to(hit_position) - WALL_MARGIN, 0.0, length)
 
 
+## Slack rope must not drag a grappling teammate back through walls when the
+## frozen body snaps to its rest transform. Remote peers run this from the
+## tension RPC, so the climber that is actually simulated drops the anchor.
+func _release_grapplers() -> void:
+	if owner_peer_id <= 0:
+		return
+	for climber in get_tree().get_nodes_in_group("climbers"):
+		if climber.has_method("release_tail_anchor"):
+			climber.call("release_tail_anchor", owner_peer_id)
+
+
 func _apply_tension(active: bool, direction: Vector3, length: float) -> void:
 	tensioned = active and elastic and carrier_id == 0
 	tension_direction = direction.normalized() if direction.length_squared() > 0.001 else Vector3.FORWARD
@@ -135,9 +177,12 @@ func _apply_tension(active: bool, direction: Vector3, length: float) -> void:
 func set_carrier(peer_id: int, throw_velocity: Vector3 = Vector3.ZERO) -> void:
 	if carrier_id == peer_id:
 		return
+	var was_tensioned := tensioned
 	carrier_id = maxi(0, peer_id)
 	_return_timer = 0.0
 	_apply_tension(false, Vector3.FORWARD, 0.0)
+	if was_tensioned:
+		_release_grapplers()
 	if carrier_id > 0:
 		top_level = true
 		freeze = true
@@ -153,8 +198,14 @@ func set_carrier(peer_id: int, throw_velocity: Vector3 = Vector3.ZERO) -> void:
 	top_level = true
 	freeze = false
 	gravity_scale = 1.0
-	collision_layer = 1
-	collision_mask = 1
+	# Keep the rope on its grappleable layer so an owner raycast can still find
+	# it, but add world layer 1 so PhysicsServer resolves contacts against the
+	# mountain and props. Mask the same layers to make the collision symmetric.
+	collision_layer = WALL_LAYER_MASK | 4
+	collision_mask = WALL_LAYER_MASK
+	# The capsule is thin and the throw is fast; sweep it so a thin wall cannot
+	# be skipped between physics ticks.
+	continuous_cd = true
 	linear_velocity = throw_velocity
 	angular_velocity = Vector3(sin(float(prop_id.length())), 1.4, cos(float(prop_id.length()))) * 3.0
 	_return_timer = 2.6
@@ -216,6 +267,7 @@ func _reset_to_owner() -> void:
 	gravity_scale = 0.0
 	collision_layer = 4 if elastic else 0
 	collision_mask = 0
+	continuous_cd = false
 	freeze = true
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 

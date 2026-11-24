@@ -19,10 +19,6 @@ config/icon="res://icon.svg"
 
 Net="*res://scripts/network/network_manager.gd"
 
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_super-wakatime/plugin.cfg")
-
 [input]
 
 arm_left={
