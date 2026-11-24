@@ -26,13 +26,9 @@ var player_name: String = DEFAULT_NAME
 var port: int = DEFAULT_PORT
 var web_room: String = ""
 var match_seed: int = 0
-## Mirror of the class the host assigned to this peer. Classes are never
-## chosen locally: the host alternates them in join order before match start.
-var character_type: int = CharacterType.STRONG
-
 ## Keyed by peer id. Every value has at least name, color and ready.
 var players: Dictionary[int, Dictionary] = {}
-## Guest join order. Index 0 is Elastic, 1 is Strong, 2 is Elastic, and so on.
+## Guest join order, used only for deterministic lobby colouring.
 var _join_order: Array[int] = []
 var recent_chat: Array[Dictionary] = []
 var max_players: int = 4
@@ -89,7 +85,6 @@ func create_server(p_player_name: String, p_max_players: int = 4, p_port: int = 
 	multiplayer.multiplayer_peer = _enet_peer
 	peer_id = multiplayer.get_unique_id()
 	players[1] = _make_player_entry(player_name, 1, true)
-	assign_character_types()
 
 	hosted.emit()
 	connected.emit()
@@ -146,56 +141,20 @@ func join_web_room(p_player_name: String, p_signal_url: String, p_room: String) 
 	_web_rtc.call("start_client", p_signal_url, web_room)
 
 
-## The duo needs both classes: only Strong can throw an awake Elastic, and only
-## Elastic can grow the rope a Strong climbs. A same-class lobby cannot play.
-func has_both_classes() -> bool:
-	var has_strong := false
-	var has_elastic := false
-	for id in players:
-		var value := int((players[id] as Dictionary).get("character_type", CharacterType.STRONG))
-		if value == CharacterType.STRONG:
-			has_strong = true
-		elif value == CharacterType.ELASTIC:
-			has_elastic = true
-	return has_strong and has_elastic
 
 
-## The host is always Strong. Guests alternate in the order they joined, so the
-## first guest is Elastic and every two-player lobby has both signature moves.
-func class_for_join_index(index: int) -> int:
-	return CharacterType.ELASTIC if index % 2 == 0 else CharacterType.STRONG
 
 
-## Recomputes every roster entry from the join order. Called whenever someone
-## joins or leaves so the duo stays available even after a disconnect.
-func assign_character_types() -> void:
-	if not is_host:
-		return
-	if players.has(1):
-		var host_entry: Dictionary = players[1]
-		host_entry["character_type"] = CharacterType.STRONG
-		players[1] = host_entry
-	for i in range(_join_order.size()):
-		var id := _join_order[i]
-		if not players.has(id):
-			continue
-		var entry: Dictionary = players[id]
-		entry["character_type"] = class_for_join_index(i)
-		players[id] = entry
-	if peer_id > 0 and players.has(peer_id):
-		character_type = int((players[peer_id] as Dictionary).get("character_type", CharacterType.STRONG))
-	lobby_changed.emit()
-	_broadcast_lobby()
+
+
+
 
 
 func start_match() -> void:
 	if not is_host or not multiplayer.is_server() or _match_starting:
 		return
 	if players.size() < 2:
-		match_start_rejected.emit("Need at least one Strong and one Elastic climber.")
-		return
-	if not has_both_classes():
-		match_start_rejected.emit("Both classes are required: one Strong and one Elastic.")
+		match_start_rejected.emit("Need at least two climbers for a race.")
 		return
 	_match_starting = true
 	match_seed = 20261121 + (Time.get_ticks_msec() % 100000)
@@ -260,7 +219,6 @@ func _on_multiplayer_peer_connected(id: int) -> void:
 	if not _join_order.has(id):
 		_join_order.append(id)
 	players[id] = _make_player_entry(_default_name_for(id), id, false)
-	assign_character_types()
 	peer_connected.emit(id)
 
 	# The joining peer gets the complete snapshot first, then everyone else is
@@ -275,10 +233,7 @@ func _on_multiplayer_peer_disconnected(id: int) -> void:
 	players.erase(id)
 	_join_order.erase(id)
 	peer_disconnected.emit(id)
-	if is_host:
-		assign_character_types()
-	else:
-		lobby_changed.emit()
+	lobby_changed.emit()
 
 
 func _on_connected_to_server() -> void:
@@ -334,7 +289,6 @@ func _rpc_register_name(requested_name: String) -> void:
 	if entry["name"].is_empty():
 		entry["name"] = _default_name_for(sender)
 	players[sender] = entry
-	assign_character_types()
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -363,12 +317,9 @@ func _rpc_apply_lobby(snapshot: Dictionary) -> void:
 			"name": str(value.get("name", _default_name_for(id))),
 			"color": value.get("color", _color_for_peer(id)),
 			"ready": bool(value.get("ready", false)),
-			"character_type": int(value.get("character_type", CharacterType.STRONG)),
 		}
 	if peer_id > 0 and not players.has(peer_id):
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
-	if peer_id > 0 and players.has(peer_id):
-		character_type = int((players[peer_id] as Dictionary).get("character_type", CharacterType.STRONG))
 	lobby_changed.emit()
 
 
@@ -414,7 +365,6 @@ func _on_web_room_ready(assigned_id: int, room: String) -> void:
 		peer_id = assigned_id
 	if is_host:
 		players[1] = _make_player_entry(player_name, 1, true)
-		assign_character_types()
 		hosted.emit()
 	else:
 		players[peer_id] = _make_player_entry(player_name, peer_id, false)
@@ -476,18 +426,10 @@ func _make_player_entry(display_name: String, id: int, ready: bool) -> Dictionar
 	var clean := _clean_name(display_name)
 	if clean.is_empty():
 		clean = _default_name_for(id)
-	var assigned := CharacterType.STRONG
-	if is_host:
-		if id == 1:
-			assigned = CharacterType.STRONG
-		else:
-			var index := _join_order.find(id)
-			assigned = class_for_join_index(index) if index >= 0 else CharacterType.ELASTIC
 	return {
 		"name": clean,
 		"color": _color_for_peer(id),
 		"ready": ready,
-		"character_type": assigned,
 	}
 
 
@@ -529,7 +471,6 @@ func _reset_transport(emit_disconnected: bool = false) -> void:
 	is_host = false
 	players.clear()
 	_join_order.clear()
-	character_type = CharacterType.STRONG
 	recent_chat.clear()
 	port = DEFAULT_PORT
 	max_players = 4

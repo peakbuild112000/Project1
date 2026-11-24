@@ -1,14 +1,19 @@
 extends SceneTree
 
+## Gameplay smoke test for the competitive summit race.
+
 var failures: int = 0
+
 
 func fail(msg: String) -> void:
 	push_error(msg)
 	failures += 1
 
+
 func check(cond: bool, msg: String) -> void:
 	if not cond:
 		fail(msg)
+
 
 func _initialize() -> void:
 	var net: Node = root.get_node_or_null("Net")
@@ -19,8 +24,8 @@ func _initialize() -> void:
 	net.set("peer_id", 1)
 	net.set("is_host", true)
 	var roster: Dictionary[int, Dictionary] = {}
-	roster[1] = {"name": "Host", "color": Color(0.3, 0.8, 1.0), "ready": true, "character_type": CharacterType.STRONG}
-	roster[2] = {"name": "Guest", "color": Color(1.0, 0.5, 0.3), "ready": true, "character_type": CharacterType.ELASTIC}
+	roster[1] = {"name": "Host", "color": Color(0.3, 0.8, 1.0), "ready": true}
+	roster[2] = {"name": "Guest", "color": Color(1.0, 0.5, 0.3), "ready": true}
 	net.set("players", roster)
 
 	var packed := load("res://scenes/game.tscn") as PackedScene
@@ -34,86 +39,22 @@ func _initialize() -> void:
 	await process_frame
 
 	var players_root: Node = game.get_node("Players")
-	check(players_root.get_child_count() == 2, "Expected 2 climbers, got %d" % players_root.get_child_count())
+	check(players_root.get_child_count() == 2, "Expected 2 racers, got %d" % players_root.get_child_count())
 	var climber1 := players_root.get_node_or_null("Climber_1")
 	var climber2 := players_root.get_node_or_null("Climber_2")
 	check(climber1 != null, "Climber_1 missing")
 	check(climber2 != null, "Climber_2 missing")
+	if climber1 == null or climber2 == null:
+		quit(1)
+		return
 
-	# Two classes: Strong carries/throws, Elastic owns a rope tail.
-	var tail2: Node = null
-	if climber2 != null:
-		tail2 = climber2.find_child("Tail", true, false)
-	if climber1 != null and climber2 != null:
-		check(int(climber1.get("character_type")) == CharacterType.STRONG, "Host is not Strong")
-		check(int(climber2.get("character_type")) == CharacterType.ELASTIC, "Guest is not Elastic")
-		var state1: Dictionary = climber1.call("get_state")
-		var state2: Dictionary = climber2.call("get_state")
-		check(int(state1.get("character_type", -1)) == CharacterType.STRONG, "Strong type not replicated in state")
-		check(int(state2.get("character_type", -1)) == CharacterType.ELASTIC, "Elastic type not replicated in state")
-
-		# The rubbery Elastic survives the same landing with less stamina lock.
-		var saved_stamina_1 := float(climber1.get("current_stamina"))
-		var saved_stamina_2 := float(climber2.get("current_stamina"))
-		var saved_lock_1 := float(climber1.get("stamina_lock"))
-		var saved_lock_2 := float(climber2.get("stamina_lock"))
-		var saved_injury_1 := float(climber1.get("injury"))
-		var saved_injury_2 := float(climber2.get("injury"))
-		for candidate in [climber1, climber2]:
-			candidate.set("current_stamina", float(candidate.get("max_stamina")))
-			candidate.set("stamina_lock", 0.0)
-			candidate.set("injury", 0.0)
-			candidate.set("stun_timer", 0.0)
-		climber1.call("apply_fall_impact", 20.0, 0.0)
-		climber2.call("apply_fall_impact", 20.0, 0.0)
-		var strong_lock := float(climber1.get("stamina_lock"))
-		var elastic_lock := float(climber2.get("stamina_lock"))
-		check(strong_lock > elastic_lock, "Elastic took as much fall damage as Strong")
-		check(elastic_lock > 0.0 and elastic_lock < strong_lock * 0.6, "Elastic fall damage reduction missing")
-		climber1.set("current_stamina", saved_stamina_1)
-		climber2.set("current_stamina", saved_stamina_2)
-		climber1.set("stamina_lock", saved_lock_1)
-		climber2.set("stamina_lock", saved_lock_2)
-		climber1.set("injury", saved_injury_1)
-		climber2.set("injury", saved_injury_2)
-		climber1.set("stun_timer", 0.0)
-		climber2.set("stun_timer", 0.0)
-
-		var tail1: Node = climber1.find_child("Tail", true, false)
-		check(tail1 != null, "Strong climber missing tail node")
-		check(tail2 != null, "Elastic climber missing tail node")
-		if tail1 != null:
-			check(not bool(tail1.call("can_be_grappled")), "Strong tail is grappleable")
-		if tail2 != null:
-			check(bool(tail2.call("can_be_grappled")), "Elastic tail is not grappleable")
-			# The stretched rope must stop at the first wall instead of going
-			# through it. A temporary world-body wall four metres ahead is enough.
-			var wall := StaticBody3D.new()
-			var shape := BoxShape3D.new()
-			shape.size = Vector3(8.0, 8.0, 1.0)
-			var collider := CollisionShape3D.new()
-			collider.shape = shape
-			wall.add_child(collider)
-			wall.collision_layer = 1
-			wall.collision_mask = 1
-			game.add_child(wall)
-			wall.global_position = climber2.global_position + Vector3(0.0, 0.0, -4.0)
-			await physics_frame
-			tail2.call("set_tension", true, Vector3.FORWARD, 13.0)
-			var clamped: float = float(tail2.get("tension_length"))
-			check(clamped > 0.0 and clamped < 5.0, "Rope crossed the wall (length=%.2f)" % clamped)
-			var teammate_arm: Object = climber1.get("left_anchor")
-			teammate_arm.set("anchored", true)
-			teammate_arm.set("body", tail2)
-			tail2.call("set_tension", false, Vector3.FORWARD, 0.0)
-			check(not bool(teammate_arm.get("anchored")), "Slack rope kept a teammate grappled through a wall")
-			tail2.call("set_carrier", 1)
-			tail2.call("set_carrier", 0, Vector3(0.0, 4.5, -12.0))
-			check((int(tail2.get("collision_layer")) & 1) != 0, "Thrown tail is not on the world layer")
-			check((int(tail2.get("collision_mask")) & 1) != 0, "Thrown tail does not scan the world layer")
-			check(bool(tail2.get("continuous_cd")), "Thrown tail has no swept collision")
-			tail2.call("_reset_to_owner")
-			wall.queue_free()
+	var state1: Dictionary = climber1.call("get_state")
+	var state2: Dictionary = climber2.call("get_state")
+	for token in ["character_type", "stamina_lock", "stretch", "unconscious", "bandages", "carry_kind"]:
+		check(not state1.has(token), "Local state still exposes " + token)
+		check(not state2.has(token), "Remote state still exposes " + token)
+	check(not climber1.has_method("add_bandage"), "Racers must not carry bandages")
+	check(not climber1.has_method("set_character_type"), "Racers must not have classes")
 
 	check(int(game.get("_phase")) == 0, "Expected countdown phase")
 	var guard := 0
@@ -122,298 +63,80 @@ func _initialize() -> void:
 		guard += 1
 	check(int(game.get("_phase")) == 1, "Countdown did not transition to active")
 
+	var level_node: Node = game.get_node("Level")
 	var props: Array = game.get_tree().get_nodes_in_group("climb_props")
 	var items: Array = game.get_tree().get_nodes_in_group("climb_items")
 	var enemies: Array = game.get_tree().get_nodes_in_group("climb_enemies")
-	check(props.size() >= 16, "Expected physical props, got %d" % props.size())
-	check(items.size() >= 7, "Expected jetpack and bandage pickups, got %d" % items.size())
+	check(props.size() == 4, "Expected four trampolines, got %d" % props.size())
+	check(items.size() == 2, "Expected two jetpacks, got %d" % items.size())
 	check(enemies.size() >= 6, "Expected patrolling enemies, got %d" % enemies.size())
-	var bandage_pickups: int = 0
+	for prop in props:
+		check(int(prop.get("kind")) == ClimbProp.Kind.TRAMPOLINE, "Only trampoline props belong in the race")
+		check(float(prop.get("bounce_impulse")) > 0.0, "Trampoline has no launch impulse")
+		check(prop.get("_bounce_zone") != null, "Trampoline bounce zone is missing")
 	for item in items:
-		if int(item.get("item_kind")) == 1:
-			bandage_pickups += 1
-	check(bandage_pickups >= 5, "Expected bandage pickups, got %d" % bandage_pickups)
-	var level_node: Node = game.get_node("Level")
-	check(level_node.find_child("ControlDrawings", true, false) != null, "Cabin control drawings missing")
-	check(level_node.find_child("MissionSign", true, false) != null, "Mission sign missing")
+		check(str(item.get("item_id")).begins_with("jetpack_"), "Only jetpack pickups belong in the race")
+		check(not item.has_method("add_bandage"), "Item pickup still grants bandages")
+	check(level_node.find_child("ControlDrawings", true, false) == null, "Control drawings must be removed")
+	check(level_node.find_child("MissionSign", true, false) == null, "Mission sign must be removed")
 	var mountain: Node = level_node.find_child("ProceduralMountain", true, false)
 	check(mountain != null, "Procedural mountain missing")
 	if mountain != null:
 		var collision: CollisionShape3D = mountain.find_child("CollisionShape3D", true, false) as CollisionShape3D
 		check(collision != null and (collision.shape is ConcavePolygonShape3D), "Mountain collision missing")
-		check(level_node.has_method("_height_at"), "Mountain height generator missing")
-		check(float(level_node.call("_height_at", 0.0, -6.55)) <= 1.2, "Mountain still blocks the cabin doorway")
-		check(float(level_node.call("_height_at", 0.0, 0.0)) <= 1.5, "Cabin exit corridor is not flat")
-	var bucket = null
-	for candidate in props:
-		if str(candidate.get("prop_id")) == "bucket_0":
-			bucket = candidate
-			break
-	check(bucket != null, "Water bucket missing")
-	if bucket != null:
-		check(float(bucket.get("water")) > 99.0, "Bucket did not start full")
-		bucket.global_transform.basis = Basis(Vector3(1.0, 0.0, 0.0), deg_to_rad(60.0))
-		bucket.call("_physics_process", 0.25)
-		check(float(bucket.get("water")) < 100.0, "Tilted bucket did not spill")
-		bucket.call("set_water", 100.0)
-		check(bool(bucket.call("can_be_grappled")), "Bucket cannot be hooked by hands")
-		check(not bool(bucket.get("freeze")), "Bucket is frozen before carry")
-		if climber1 != null:
-			var old_pos: Vector3 = climber1.global_position
-			climber1.set("global_position", bucket.global_position + Vector3(2.0, 0.0, 0.0))
-			var cam_pivot: Node3D = climber1.get_node("CameraPivot")
-			var cam_pos: Vector3 = bucket.global_position + Vector3(0.0, 0.95, 5.0)
-			cam_pivot.global_transform = Transform3D(Basis.looking_at((bucket.global_position - cam_pos).normalized(), Vector3.UP), cam_pos)
-			climber1.call("_fire_arm", true)
-			var left: Object = climber1.get("left_anchor")
-			check(bool(left.get("anchored")), "Left hand did not hook the bucket")
-			check(left.get("body") == bucket, "Left hand hooked the wrong body")
-			climber1.call("_release_arm", true)
-			var before_pull: Vector3 = bucket.linear_velocity
-			game.call("report_prop_pull", "bucket_0", Vector3(900.0, 0.0, 0.0))
-			await physics_frame
-			check(bucket.linear_velocity.length() > before_pull.length(), "Bucket did not react to hand pull")
-			climber1.set("global_position", old_pos)
-			bucket.linear_velocity = Vector3.ZERO
-			bucket.angular_velocity = Vector3.ZERO
+	check(level_node.has_method("_height_at"), "Mountain height generator missing")
+	for slot in range(4):
+		var spawn: Vector3 = level_node.call("get_spawn_point", slot)
+		check(absf(spawn.y - 1.95) <= 0.01, "Spawn slot %d is not on the flat start pad" % slot)
+		check(float(level_node.call("_height_at", spawn.x, spawn.z)) <= 1.2, "Start pad slot %d sits on a slope" % slot)
 
-	if climber1 != null:
-		game.call("request_carry", 0, "crate_0")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == 0, "Carry link not applied to climber")
-		var prop = null
-		for candidate in game.get_tree().get_nodes_in_group("climb_props"):
-			if str(candidate.get("prop_id")) == "crate_0":
-				prop = candidate
-				break
-		check(prop != null and int(prop.get("carrier_id")) == 1, "Prop carrier not assigned")
-		game.call("request_drop")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == -1, "Carry link not cleared")
+	game.call("_authorize_item", 1, "jetpack_0")
+	await process_frame
+	check(bool(climber1.get("has_jetpack")), "Jetpack not equipped")
+	check(float(climber1.get("jetpack_fuel")) > 0.0, "Jetpack has no fuel")
+	climber1.call("remove_jetpack")
+	check(not bool(climber1.get("has_jetpack")), "Jetpack was not removed")
 
-		# Strong can simply lift the awake Elastic with both hands: no launch.
-		climber2.set("last_launch_velocity", Vector3.ZERO)
-		game.call("request_carry", 1, "2")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == 1, "Strong did not carry the awake Elastic")
-		check(int(climber2.get("carried_by_peer")) == 1, "Elastic was not marked as carried")
-		check((climber2.get("last_launch_velocity") as Vector3).length_squared() <= 0.01, "Lifting the Elastic launched them")
-		game.call("request_drop")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == -1, "Gentle drop did not clear the carry link")
-		check((climber2.get("last_launch_velocity") as Vector3).length_squared() <= 0.01, "Gentle drop launched the Elastic")
+	climber1.call("start_ragdoll")
+	check(bool(climber1.get("ragdoll_active")), "Ragdoll stumble did not start")
+	climber1.call("_process_ragdoll", 4.0)
+	check(not bool(climber1.get("ragdoll_active")), "Ragdoll stumble did not recover on its own")
 
-		# F carry followed by Q throws them high via the authoritative RPC.
-		game.call("request_carry", 1, "2")
-		await process_frame
-		game.call("request_throw_elastic", 1)
-		await process_frame
-		check(int(climber1.get("carry_kind")) == -1, "Q throw did not clear the carry link")
-		var launch: Vector3 = climber2.get("last_launch_velocity")
-		check(launch.y >= 20.0, "Q throw is not high enough (y=%.2f)" % launch.y)
-		check(launch.length_squared() > 1.0, "Q throw did not launch the Elastic")
+	climber1.emit_signal("checkpoint_reached", 26.0)
+	await process_frame
+	var states: Dictionary = game.get("_players_state")
+	var st1: Dictionary = states.get(1, {})
+	check(float(st1.get("checkpoint_y", 0.0)) == 26.0, "Checkpoint not registered")
+	var checkpoint_pos: Vector3 = level_node.call("get_checkpoint_position", 26.0)
+	check(checkpoint_pos.y >= 26.0, "Checkpoint respawn point is too low")
 
-		# Q also throws a nearby Elastic directly, without the F pickup step.
-		check(game.has_method("request_quick_throw"), "Quick throw RPC missing")
-		climber2.set("last_launch_velocity", Vector3.ZERO)
-		climber2.set("linear_velocity", Vector3.ZERO)
-		climber2.set("global_position", climber1.global_position + Vector3(1.2, 0.0, 0.0))
-		climber1.call("_request_throw_elastic")
-		await process_frame
-		var quick_launch: Vector3 = climber2.get("last_launch_velocity")
-		check(quick_launch.y >= 20.0, "Quick Q throw is not high enough (y=%.2f)" % quick_launch.y)
-		check(int(climber1.get("carry_kind")) == -1, "Quick throw left a carry link")
+	climber1.emit_signal("died", "fall")
+	await process_frame
+	st1 = states.get(1, {})
+	check(not st1.has("lives"), "Lives must not exist")
+	check(not st1.has("spectator"), "Spectator state must not exist")
+	check(is_equal_approx(float(st1.get("penalty", 0.0)), 5.0), "Fall penalty must be five seconds")
+	check(is_equal_approx(float(climber1.call("usable_max_stamina")), float(climber1.get("max_stamina"))), "Falls must not lock stamina")
 
-		# Coop building: a carrier cannot anchor their own object, but a nearby
-		# climber can fix and release it. Anchored props cannot be picked up.
-		var build_prop: Node = null
-		for candidate in props:
-			if str(candidate.get("prop_id")) == "crate_0":
-				build_prop = candidate
-				break
-		if build_prop != null:
-			build_prop.global_position = climber1.global_position + Vector3(1.0, 0.0, 0.0)
-			game.call("request_carry", 0, "crate_0")
-			await physics_frame
-			game.call("_authorize_fix", 1, "crate_0")
-			check(not bool(build_prop.get("is_fixed")), "Carrier anchored the prop they were holding")
-			game.call("request_drop")
-			await physics_frame
-			# Dropping near the teammate is what allows the coop anchor; place the
-			# prop explicitly so this test does not depend on physics timing.
-			build_prop.global_position = climber1.global_position + Vector3(1.0, 0.0, 0.0)
-			game.call("_authorize_fix", 1, "crate_0")
-			await process_frame
-			check(bool(build_prop.get("is_fixed")), "Prop was not fixed")
-			check(bool(build_prop.get("freeze")), "Fixed prop is not frozen")
-			game.call("request_carry", 0, "crate_0")
-			await process_frame
-			check(int(climber1.get("carry_kind")) == -1, "Fixed prop was picked up")
-			game.call("_authorize_fix", 1, "crate_0")
-			check(not bool(build_prop.get("is_fixed")), "Prop was not released")
-			await process_frame
+	states[1]["highest_y"] = 50.0
+	states[2]["highest_y"] = 10.0
+	game.set("_elapsed", 299.99)
+	await process_frame
+	check(int(game.get("_phase")) == 2, "Time-up did not end the race")
+	check(int(game.get("_winner_id")) == 1, "Time-up did not pick the leading racer")
+	check(str(game.get("_end_reason")) == "TIME UP", "Wrong time-up reason")
 
-		game.call("_authorize_item", 1, "jetpack_0")
-		await process_frame
-		check(bool(climber1.get("has_jetpack")), "Jetpack not equipped")
-
-		# A nearby tail must not steal F from an awake Elastic: the Strong needs
-		# the teammate itself for the high throw.
-		var saved_camera: Node = climber1.camera_pivot
-		climber1.camera_pivot = null
-		climber1.set("global_position", climber2.global_position + Vector3(1.1, 0.0, 0.0))
-		tail2.global_position = climber1.global_position + Vector3(0.15, 0.0, 0.0)
-		climber1.call("_request_carry")
-		check(int(climber1.get("carry_kind")) == 1, "Strong grabbed the tail instead of the Elastic")
-		game.call("request_drop")
-		climber1.camera_pivot = saved_camera
-
-		# An awake Elastic can be carried by a Strong, then thrown higher.
-		game.call("request_carry", 1, "2")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == 1, "Awake Elastic was not grabbed")
-		check(int(climber2.get("carried_by_peer")) == 1, "Carried Elastic was not linked")
-		var throw_ready: bool = climber2.has_method("launch_from_carry")
-		check(throw_ready, "Elastic passenger has no launch_from_carry API")
-		# A falling carrier would legitimately subtract from the throw arc.
-		climber1.linear_velocity = Vector3.ZERO
-		game.call("request_drop")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == -1, "Carried climber was not dropped")
-		check(int(climber2.get("carried_by_peer")) == 0, "Carried link was not cleared")
-		var launch_velocity: Vector3 = climber2.get("last_launch_velocity")
-		check(launch_velocity.y > 5.0, "Thrown Elastic did not receive an upward launch")
-
-		# A Strong cannot carry another awake Strong.
-		climber2.call("set_character_type", CharacterType.STRONG)
-		game.call("request_carry", 1, "2")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == -1, "Strong illegally carried an awake Strong")
-		check(int(climber2.get("carried_by_peer")) == 0, "Awake Strong was illegally linked")
-		climber2.call("set_character_type", CharacterType.ELASTIC)
-
-		# Fall damage stays as a red locked slice until a bandage is used.
-		check(int(climber1.get("bandages")) == 0, "Climbers must start with no bandages")
-		var stamina_before: float = float(climber1.get("current_stamina"))
-		climber1.call("apply_fall_impact", 24.0)
-		check(float(climber1.get("current_stamina")) < stamina_before, "Fall damage did not drain stamina")
-		check(float(climber1.get("stamina_lock")) > 0.0, "Fall damage did not lock stamina")
-		check(float(climber1.call("usable_max_stamina")) < float(climber1.get("max_stamina")), "Usable stamina not reduced")
-		check(float(climber1.get("injury")) > 0.0, "Fall damage did not cause injury")
-		var injury_before: float = float(climber1.get("injury"))
-		climber1.call("use_bandage")
-		check(int(climber1.get("bandages")) == 0, "Bandage used without owning one")
-		climber1.call("add_bandage", 1)
-		var lock_before: float = float(climber1.get("stamina_lock"))
-		climber1.call("use_bandage")
-		check(int(climber1.get("bandages")) == 0, "Bandage was not consumed")
-		check(float(climber1.get("stamina_lock")) < lock_before, "Bandage did not unlock stamina")
-		check(float(climber1.get("injury")) < injury_before, "Bandage did not reduce injury")
-		check(float(climber1.call("get_total_weight")) > 0.0, "Jetpack weight not counted in load")
-
-		climber1.call("remove_jetpack")
-		check(not bool(climber1.get("has_jetpack")), "Jetpack was not removed")
-
-		climber1.call("start_ragdoll")
-		check(bool(climber1.get("ragdoll_active")), "ragdoll_active not set")
-		climber1.call("recover")
-		check(not bool(climber1.get("ragdoll_active")), "ragdoll_active not cleared")
-
-		# A downed teammate can be carried, dropped, then revived with a bandage.
-		climber2.call("set_persistent_unconscious", true)
-		climber2.set("global_position", climber1.global_position + Vector3(1.0, 0.0, 0.0))
-		climber2.call("start_ragdoll")
-		check(bool(climber2.get("unconscious")), "Ragdoll did not mark climber unconscious")
-		climber2.call("_process_ragdoll", 3.0)
-		check(bool(climber2.get("unconscious")), "Multiplayer ragdoll must wait for a bandage")
-		game.call("request_carry", 1, "2")
-		await process_frame
-		check(int(climber2.get("carried_by_peer")) == 1, "Unconscious teammate was not carried")
-		check(not bool(climber2.get("ragdoll_active")), "Carried downed teammate kept a live ragdoll")
-		game.call("request_drop")
-		await process_frame
-		check(int(climber2.get("carried_by_peer")) == 0, "Downed teammate was not dropped")
-		check(bool(climber2.get("unconscious")), "Dropping revived a downed teammate")
-		climber1.call("add_bandage", 1)
-		climber1.set("global_position", climber2.global_position + Vector3(1.0, 0.0, 0.0))
-		climber1.call("use_bandage_on_target", 2)
-		await process_frame
-		check(not bool(climber2.get("unconscious")), "Bandage did not revive the teammate")
-		check(not bool(climber2.get("ragdoll_active")), "Revived teammate stayed ragdolled")
-		check(int(climber1.get("bandages")) == 0, "Revive bandage was not consumed")
-
-		# The cabin door must open onto flat ground, not the mountain wall.
-		for door_z in [-6.55, -5.5, -4.5, -3.5]:
-			var door_height := float(level_node.call("_height_at", 0.0, door_z))
-			check(door_height <= 2.0, "Mountain blocks the cabin door at z=%.1f (h=%.1f)" % [door_z, door_height])
-		for child in level_node.get_children():
-			if str(child.name).begins_with("Rock_"):
-				check(child.global_position.distance_to(Vector3(0.0, 1.0, -6.55)) > 4.0, "A rock blocks the cabin exit")
-
-		# A badly hurt climber who empties their bar in a fall collapses and
-		# stays unconscious until a bandage is spent.
-		climber1.call("respawn_at", Vector3(0.0, 2.0, -12.0))
-		climber1.set("injury", 0.9)
-		climber1.set("current_stamina", 5.0)
-		climber1.call("apply_fall_impact", 24.0, 0.0)
-		check(bool(climber1.get("ragdoll_active")), "Critical fall did not ragdoll the climber")
-		check(bool(climber1.get("unconscious")), "Critical fall did not knock the climber out")
-		check(bool(climber1.get("persistent_unconscious")), "Fall collapse must wait for a bandage")
-		climber1.call("respawn_at", Vector3(1.0, 2.0, -12.0))
-
-		# The downed timer advances only while the teammate is not carried.
-		var death_reasons: Array = []
-		climber2.connect("died", func(reason): death_reasons.append(str(reason)))
-		climber2.call("respawn_at", Vector3(2.0, 2.0, -12.0))
-		climber2.call("set_persistent_unconscious", true)
-		climber2.call("start_ragdoll")
-		check(float(climber2.call("get_death_time_left")) > 0.0, "Downed climber has no death countdown")
-		climber2.set("unconscious_time", float(climber2.get("unconscious_death_time")) - 0.1)
-		climber2.call("_process_ragdoll", 0.2)
-		check(bool(climber2.get("dead")), "Downed climber did not die when the timer ran out")
-		check(death_reasons.has("unconscious"), "Death reason must be unconscious")
-
-		climber2.call("respawn_at", Vector3(2.0, 2.0, -12.0))
-		climber2.call("set_persistent_unconscious", true)
-		climber2.call("start_ragdoll")
-		climber2.set("unconscious_time", 5.0)
-		game.call("request_carry", 1, "2")
-		await process_frame
-		check(int(climber2.get("carried_by_peer")) == 1, "Downed climber was not carried for timer test")
-		var paused_time := float(climber2.get("unconscious_time"))
-		for _i in range(3):
-			await process_frame
-		check(is_equal_approx(float(climber2.get("unconscious_time")), paused_time), "Carrying did not pause the death timer")
-		game.call("request_drop")
-		await process_frame
-		climber2.call("respawn_at", Vector3(2.0, 2.0, -12.0))
-
-		climber1.emit_signal("checkpoint_reached", 20.0)
-		await process_frame
-		var states: Dictionary = game.get("_players_state")
-		var st1: Dictionary = states.get(1, {})
-		check(float(st1.get("checkpoint_y", 0.0)) == 20.0, "Checkpoint not registered")
-
-		climber1.emit_signal("died", "fall")
-		await process_frame
-		st1 = states.get(1, {})
-		check(not st1.has("lives"), "Lives must not exist")
-		check(not st1.has("spectator"), "Spectator state must not exist")
-		check(float(st1.get("penalty", 0.0)) == 5.0, "Penalty not applied")
-
-		climber1.emit_signal("summit_reached")
-		await process_frame
-		check(int(game.get("_phase")) == 1, "Summit should not end the water mission")
-
-		game.call("request_carry", 0, "bucket_0")
-		await process_frame
-		check(int(climber1.get("carry_kind")) == 0, "Bucket carry link not applied")
-		climber1.set("global_position", level_node.call("get_house_position"))
-		await process_frame
-		await process_frame
-		check(int(game.get("_phase")) == 2, "Water delivery did not end match")
-		check(int(game.get("_winner_id")) == 1, "Wrong winner after water delivery")
-		check(str(game.get("_end_reason")) == "WATER DELIVERED", "Wrong end reason")
+	game.set("_phase", 1)
+	game.set("_elapsed", 0.0)
+	game.set("_winner_id", 0)
+	game.set("_end_reason", "")
+	states[1]["highest_y"] = 0.0
+	states[2]["highest_y"] = 0.0
+	climber2.emit_signal("summit_reached")
+	await process_frame
+	check(int(game.get("_phase")) == 2, "Summit did not end the race")
+	check(int(game.get("_winner_id")) == 2, "First summit toucher did not win")
+	check(str(game.get("_end_reason")) == "SUMMIT", "Wrong summit reason")
 
 	print("GAME SMOKE failures=", failures)
 	quit(0 if failures == 0 else 1)

@@ -1,115 +1,218 @@
-# Climb Together — design contract
+# Summit Race — design contract
 
 ## Goal
-A difficult cooperative/competitive 3D climbing game for 1–4 players. The round lasts as long as players survive and climb; falling respawns at the last checkpoint and adds a time penalty. Players spawn in a cabin, leave it to bring a huge water bucket from the summit back home without spilling it. Delivering any remaining water to the cabin wins the match; emptying the bucket fails the delivery. Carrying objects, the bucket or climbers costs stamina and builds internal effort; if the effort overloads, the climber loses their grip and ragdolls. Longer falls accelerate gravity, widen the camera FOV and lock more stamina on impact. Hard landings and enemy strikes permanently lock part of the stamina bar in red until a bandage is used, and hard landings also cause injuries that slow regeneration. Stamina refills only on solid ground. A badly injured climber who empties their bar in a fall collapses unconscious; a death countdown runs until a bandage is used, and carrying the downed climber pauses that countdown without healing them. Nobody starts with bandages. There is no health bar, no effort bar and no carry slot readout. Total carried weight slows movement and jumping. Two classes are assigned automatically by the host: **Strong** carries and throws an awake **Elastic** teammate high toward the camera direction; any class can carry a downed teammate. The host is Strong and guests alternate Elastic/Strong/Elastic in join order. The Elastic owns a rope tail that stretches with `Q` so a Strong teammate can hook and climb it. A downed teammate can be dropped and revived with a bandage. Arm reach is short (14 m). There is no ball mode and no manual arm-stretch action; `Q` only tensions the Elastic rope tail.
 
-Browsers cannot host ENet/UDP, and there is no offline solo mode. Online play uses WebRTC: **HOST ROOM** and **JOIN ROOM** talk to a WebSocket signaling relay (`tools/signaling_server.js`) through `scripts/network/web_rtc_room.gd`, then game traffic flows over `WebRTCMultiplayerPeer` data channels. The host is always id `1`, so the authoritative game logic is identical on desktop and Web. Direct `create_server()` / `join_server()` calls still reject Web with the ENet browser messages.
+A difficult competitive 3D climbing race for 2–4 players. Every racer starts on
+the same flat pad at the foot of a seeded procedural mountain. The first climber
+to touch the summit hazard wins immediately with reason `SUMMIT`. If the
+300-second timer expires, the racer with the best score wins with reason
+`TIME UP`. Falls below `y = -12` respawn at the last checkpoint and add
+`RESPAWN_PENALTY = 5.0` seconds; there are no lives, health, injuries, bandages,
+permanent stamina locks, classes, carry slots, manual arm stretch or ball mode.
+Ragdoll is a short stumble that always recovers automatically.
+
+There is no solo mode. Desktop uses ENet host/join on UDP port `7777`. Web uses
+WebRTC with WebSocket/WSS signaling. `Net.start_match()` refuses any lobby with
+fewer than two players and emits `match_start_rejected(reason)`; the gate is
+player count only.
 
 ## Shared contracts
 
 ### Autoload `Net` (`scripts/network/network_manager.gd`)
-- `peer_id: int`, `is_host: bool`, `player_name: String`, `port: int`, `web_room: String`
-- `players: Dictionary[int, Dictionary]` with at least `name: String`, `color: Color`, `ready: bool`
-- Signals: `peer_connected(peer_id)`, `peer_disconnected(peer_id)`, `connected()`, `connection_failed(message)`, `hosted()`, `lobby_changed()`, `match_started()`, `disconnected()`
+
+- `peer_id: int`, `is_host: bool`, `player_name: String`, `port: int`,
+  `web_room: String`, `match_seed: int`, `max_players: int = 4`
+- `players: Dictionary[int, Dictionary]` with at least `name: String`,
+  `color: Color`, `ready: bool`
+- Signals: `peer_connected(peer_id)`, `peer_disconnected(peer_id)`,
+  `connected()`, `connection_failed(message)`, `hosted()`, `lobby_changed()`,
+  `match_started()`, `disconnected()`, `chat_message(peer_id, message)`,
+  `match_start_rejected(reason)`
 - Methods:
   - `create_server(player_name: String, max_players: int = 4, port: int = 7777) -> void`
   - `join_server(player_name: String, address: String, port: int = 7777) -> void` (desktop ENet only)
   - `create_web_room(player_name: String, signal_url: String, room: String, max_players: int = 4) -> void`
   - `join_web_room(player_name: String, signal_url: String, room: String) -> void`
-  - `start_match() -> void` (host only; changes every peer to `res://scenes/game.tscn`)
+  - `start_match() -> void` (host only; requires at least two players and changes every peer to `res://scenes/game.tscn`)
   - `leave() -> void`
   - `set_ready(ready: bool) -> void`
   - `send_chat(message: String) -> void`
   - `player_data(peer_id: int) -> Dictionary`
+- Lobby snapshots carry only identity, colour and readiness. `Net` has no class
+  assignment or class gating methods.
 
 ### WebRTC room (`scripts/network/web_rtc_room.gd`)
-- Child of the `Net` autoload. Uses `WebSocketPeer` only for signaling JSON and `WebRTCMultiplayerPeer` for gameplay.
-- Host calls `start_host(signal_url, room, max_players)` → server assigns id `1` → `WebRTCMultiplayerPeer.create_server()`.
-- Client calls `start_client(signal_url, room)` → server assigns id `2`–`4` → `WebRTCMultiplayerPeer.create_client(id)`.
-- The host creates an offer for every joining id; clients only answer. ICE candidates are buffered until the remote description is applied.
-- Signaling messages: `create`, `join`, `created`, `joined`, `peer_joined`, `peer_left`, `offer`, `answer`, `ice`, `leave`, `error`. Rooms hold at most 4 players.
-- `room_ready(peer_id, room)` tells `Net` to publish `hosted()` / `connected()`; `failed(message)` maps to `connection_failed`.
-- `tools/signaling_server.js` is a standalone Node.js relay using the `ws` package. HTTPS pages require a `wss://` URL. Google STUN is configured by default; restrictive NATs need a TURN entry in `ICE_SERVERS`.
 
-### Player (`scenes/climber.tscn`, `scripts/player/climber.gd`)
-- Root: `RigidBody3D` named `Climber`, class `Climber`
-- Public state: `peer_id`, `display_name`, `player_color`, `character_type` (`0` Strong, `1` Elastic), `current_stamina`, `max_stamina`, `stamina_lock` (permanent red stamina), `stretch` (internal effort), `ragdoll_active`, `unconscious`, `persistent_unconscious`, `fall_time`, `carry_kind`, `carry_target_id`, `carried_by_peer`, `has_jetpack`, `jetpack_fuel`, `injury`, `bandages`, `highest_y`, `checkpoint_y`, `is_local`
-- Signals: `stamina_changed(current, max)`, `stamina_lock_changed(value)`, `stretch_changed(value, overloaded)`, `ragdoll_started`, `ragdoll_ended`, `unconscious_changed(value)`, `revived(helper_id)`, `carry_changed(kind, target_id)`, `jetpack_changed(equipped, fuel)`, `bandages_changed(count)`, `injury_changed(value)`, `fall_damage(amount, impact_speed)`, `notice_requested(text)`, `died(reason)`, `checkpoint_reached(y)`, `summit_reached`, `landed`, `anchor_changed`
+- Child of the `Net` autoload. Uses `WebSocketPeer` only for signaling JSON and
+  `WebRTCMultiplayerPeer` for gameplay.
+- Host calls `start_host(signal_url, room, max_players)` → server assigns id `1`
+  → `WebRTCMultiplayerPeer.create_server()`.
+- Client calls `start_client(signal_url, room)` → server assigns id `2`–`4` →
+  `WebRTCMultiplayerPeer.create_client(id)`.
+- The host creates an offer for every joining id; clients only answer. ICE
+  candidates are buffered until the remote description is applied.
+- Signaling messages: `create`, `join`, `created`, `joined`, `peer_joined`,
+  `peer_left`, `offer`, `answer`, `ice`, `leave`, `error`. Rooms hold at most four
+  players.
+- `room_ready(peer_id, room)` tells `Net` to publish `hosted()` / `connected()`;
+  `failed(message)` maps to `connection_failed`.
+- `tools/signaling_server.js` is a standalone Node.js relay using the `ws`
+  package. HTTPS pages require a `wss://` URL. Google STUN is configured by
+  default; restrictive NATs need a TURN entry in `ICE_SERVERS`.
+
+### Racer (`scenes/climber.tscn`, `scripts/player/climber.gd`)
+
+- Root: `RigidBody3D` named `Climber`, class `Climber`.
+- Public state: `peer_id`, `display_name`, `player_color`, `current_stamina`,
+  `max_stamina`, `ragdoll_active`, `fall_time`, `highest_y`, `checkpoint_y`,
+  `replicated_position`, `replicated_yaw`, `has_jetpack`, `jetpack_fuel`,
+  `is_local`.
+- Signals: `stamina_changed(current, max)`, `ragdoll_started`, `ragdoll_ended`,
+  `died(reason)`, `checkpoint_reached(y)`, `summit_reached`, `landed`,
+  `anchor_changed`, `jetpack_changed(equipped, fuel)`, `notice_requested(text)`.
 - Methods:
-  - `configure(peer_id: int, display_name: String, player_color: Color, character_type: int = CharacterType.STRONG) -> void`
-  - `is_strong() -> bool`, `is_elastic() -> bool`, `can_carry_climber(target: Node) -> bool`
-  - `set_character_type(value: int) -> void`, `launch_from_carry(velocity: Vector3) -> void`
+  - `configure(peer_id: int, display_name: String, player_color: Color, _unused: int = 0) -> void`
   - `respawn_at(pos: Vector3, _unused: bool = false) -> void`
   - `apply_hazard(impulse: Vector3, label: String) -> void`
+  - `apply_enemy_strike(amount: float, impulse: Vector3) -> void`
   - `apply_bounce(impulse: Vector3, label: String) -> void`
-  - `apply_fall_impact(impact_speed: float, fall_duration: float = 0.0) -> void`
-  - `equip_jetpack(amount: float) -> void`
-  - `remove_jetpack() -> void`
-  - `add_bandage(amount: int = 1) -> void`
-  - `use_bandage() -> void`
-  - `find_bandage_target() -> Node`
-  - `use_bandage_on_target(target_pid: int) -> void`
-  - `revive_with_bandage(helper_pid: int) -> void`
-  - `set_persistent_unconscious(value: bool) -> void`
-  - `usable_max_stamina() -> float`
-  - `set_stamina_lock(value: float) -> void`
-  - `get_total_weight() -> float`
-  - `set_carry(kind: int, target_id: String) -> void`
-  - `set_carried_by(peer_id: int) -> void`
-  - `get_carry_hold_point() -> Vector3`
-  - `find_fix_target() -> Node`
+  - `start_ragdoll() -> void`, `recover() -> void`
+  - `usable_max_stamina() -> float` (always `max_stamina`)
+  - `equip_jetpack(amount: float) -> void`, `remove_jetpack() -> void`
+  - `get_total_weight() -> float` (jetpack mass only)
+  - `can_climb() -> bool`, `count_anchors() -> int`
   - `get_state() -> Dictionary`
-- Carry kinds: `-1` empty, `0` physical prop, `1` another climber, `2` another climber's tail. `find_carry_target()` favours a nearby tail over props and passengers; `_find_tail()` / `_find_tail_by_owner()` resolve the target on both sides. `TailRope.set_carrier()` makes the tail `top_level` while held, then unfreezes it and gives it a forward/up impulse on release. A 2.6 s timer returns it to `rest_transform` under its owner. `_apply_carry_link()`, `_clear_carry_link()` and `_check_carry_links()` mirror prop carry links for kind `2`, and remote climbers call `_process_active_carry()` so the tail follows the carrier on every peer. `can_carry_climber()` and `GameManager._authorize_carry()` allow any class to lift a downed teammate, but only a Strong carrying an Elastic can lift an awake climber. Releasing that link calls `launch_from_carry()` with `carrier.linear_velocity + forward * 14 + up * 11`, so the Elastic is thrown higher toward the carrier's camera direction (the forward vector is flattened so camera pitch cannot remove the upward arc). The host also sends `rpc_carry_launch` to the passenger node: the owner peer is the only one that simulates that body, so it re-applies the velocity locally; `last_launch_velocity` records it for verification. `set_carried_by()` recovers an awake ragdoll, but keeps an unconscious teammate down while folding the ragdoll rig away; `_process_carried()` pulls the passenger to the holder's hold point. Dropping an unconscious passenger reopens the ragdoll without clearing `unconscious`. The watchdog drops the link only if the target dies or is no longer linked to that carrier.
-- `unconscious` is the downed game state; `ragdoll_active` is only the visual/physics state. In multiplayer `_spawn_climber()` sets `persistent_unconscious` so a ragdoll timer cannot revive the climber for free. Solo matches keep the old timed recovery. `find_bandage_target()` prefers a carried downed teammate, then the closest unconscious one inside `carry_reach + 1.0`. `use_bandage_on_target()` spends the local player's bandage and asks the host to revive; `revive_with_bandage()` stands the target up, clears the ragdoll, unlocks up to `bandage_heal` red stamina, eases injury and grants brief invulnerability.
-- Fall impacts above `fall_damage_min_speed` subtract stamina, then lock the same amount with `set_stamina_lock()`. `_update_fall_dynamics()` grows `fall_time` only while airborne, descending and unanchored; it raises `gravity_scale`, lowers `linear_damp` and caps speed at `fall_speed_cap`. `apply_fall_impact()` adds `fall_time * fall_damage_per_second` to the impact speed, lowers the safe threshold with duration, and scales injury gain and stun with duration. Locked stamina is red, excluded from `usable_max_stamina()`, survives respawn and ragdoll recovery, and can only be won back by a bandage (up to `bandage_heal` per use). Nobody starts with bandages. Injury multiplies stamina regeneration by `1 - injury * injury_regen_penalty`; a bandage also subtracts `bandage_injury_relief` injury. Regeneration only runs in the `grounded` branch of `_update_stamina()`: hanging, climbing and ordinary airborne movement never refill stamina. `PlayerCamera` widens FOV by up to `fall_fov_boost` during a long fall.
-- `is_critically_damaged()` is true at `injury >= critical_injury` or `stamina_lock >= max_stamina * critical_lock_ratio`. When `apply_fall_impact()` empties such a climber's bar, `_collapse_from_fall()` forces `persistent_unconscious` and starts a ragdoll. `unconscious_time` advances only in `_process_ragdoll()` while the climber is down and not carried; `get_death_time_left()` exposes `unconscious_death_time - unconscious_time` to the HUD. At 25/50/75% the HUD feed warns that a bandage is needed; at 100% `_die_from_unconscious()` emits `died("unconscious")`. `set_carried_by()` stops the timer because a carried passenger is no longer in `_process_ragdoll()`, but the downed state survives; only `revive_with_bandage()` clears it.
-- `apply_enemy_strike()` is the enemy contact path. It drains stamina, locks the same amount with `set_stamina_lock()`, adds injury and starts a short invulnerability window. Unlike gust damage, the stolen part cannot regenerate; it comes back only through a bandage.
-- `get_total_weight()` sums the carried prop mass, carried climber mass and `jetpack_mass_kg`. Weight scales walk/air speed and jump impulse. The bucket uses a two-hand hold point and hand visual, and `_hands_full_with_bucket()` releases anchors and blocks new ones while it is carried. `LeftFoot` / `RightFoot` meshes animate with `walk_cycle`; their contact plane matches the 1.7 m body capsule collider, feet only lift upward, and toe tilt is compensated so a shoe never sinks through the floor. The grounded `can_walk` check no longer depends on `count_anchors()`, and jumping keeps full impulse with two anchors, so feet work while both hands are busy.
-- The player shadow is a ground-projected blob (`GroundShadow`); arm shadow casting is disabled so ropes do not paint long silhouettes. `_update_shadow()` bails out when the climber or its root-level shadow is no longer in the tree.
-- `harpoon_reach` is `14.0` m (down from `35.0`) so holds must be reached progressively; `carry_reach` stays `3.6` m for grabbing props or teammates.
-- Local peer reads input and simulates physics. Remote peers freeze as kinematic bodies and receive `replicated_position` / `replicated_yaw` through `MultiplayerSynchronizer`; `_apply_remote_transform()` interpolates toward that target instead of letting the synchronizer write physics transforms directly. `respawn_at()` and `recover()` preserve the freeze state so remote bodies never fight gravity, teleport or vibrate.
-- Arms normally hook static geometry on layer 1. The water bucket is also hookable on layer 4: its hook point follows the moving body and the reaction force is sent to the host, which applies a capped impulse plus torque so hands can drag and tip it. Both climbers carry a `TailRope` node for a uniform scene shape, but only the Elastic tail is active: `TailRope.setup()` sets `elastic`, visibility and collision layer, while a Strong tail is hidden and never grappleable. `_ray_exclusions()` hides a climber's own tail so they cannot hook themselves. `can_be_grappled()` requires an Elastic owner with no carrier, so teammates can hook an Elastic tail and winch up. The tail carries `owner_peer_id` / `carrier_id`.
-- Holding `Q` as an Elastic calls `TailRope.set_tension(true, camera_forward, 13.0)`, which stretches a frozen kinematic rope body toward the camera and replicates the state through `rpc_apply_tension` every 0.05 s. `_clamp_length_to_walls()` raycasts from the owner origin along the tension direction against world layer 1 and shortens the rope at the first hit (minus `WALL_MARGIN`), so the kinematic body cannot be placed through walls; remote peers receive the already clamped length. Stretching drains `tail_tension_drain` stamina per second; hands-full states and ragdoll disable it. A Strong teammate can hook the tensioned rope with a grappling hand and climb it because the arm anchor pulls toward `body.global_transform * body_local_point`. `Q` is not an arm stretch and has no effect for Strong climbers. When a carrier releases a tail, it keeps layer 4 for grappling but adds world layer 1 with mask 1 so it collides with world bodies, and enables swept shape CCD so a thin wall cannot be skipped; `_reset_to_owner()` restores layer 4 / mask 0 with CCD disabled. When tension goes slack, every peer calls `Climber.release_tail_anchor()` for its local climber, so a teammate grappling that rope detaches before the frozen body snaps back and cannot be yanked through a wall. The final slack is also sent through the reliable `rpc_release_tail_slack(version)`; tension RPCs carry a monotonic version so a delayed packet cannot cancel a newer pull.
-- Arm visuals are sent every 0.05 s, including the released state, through `receive_arm_visual`; a released grappling arm therefore disappears instead of staying stuck in the wall on other peers.
-- Camera yaw is kept in `PlayerCamera.yaw_rad`; `_process` must not reset it, otherwise mouse look stops working.
-- Controls: WASD move, mouse look, LMB/RMB fire arms, Space jump/mantle, wheel winch, F grab/drop, E fix/release prop, Shift jetpack, B bandage (self or downed teammate), G remove empty jetpack, Esc release mouse.
-- `find_fix_target()` returns the nearest crate, plank or trampoline within `fix_reach`, preferring props held by another peer or already fixed. The HUD shows the contextual `E: FIX/RELEASE ...` prompt.
-- Players spawn inside a cabin. Simple 3D pictograms on the back wall show the basic controls; a large `BRING WATER TO YOUR HOUSE` sign lives in the world. The HUD no longer shows a mission banner when the local climber exits. The mountain center was moved to `MOUNTAIN_CENTER_Z = 16.0`, and `_height_at()` now applies a wide `exit_carve` band from the door to the first slope so the cabin entrance stays flat; `_build_rocks()` and low mountain holds/ribs skip the same corridor. Ledge widths/depths, moving platforms, checkpoint pads and the summit deck were enlarged for roomier footing.
-- All climber bodies are kept upright by `_integrate_forces`; remote climbers are also uprighted after replication so looking at them never shows a rolling body.
+- `get_state()` reports identity, position, velocity, stamina, ragdoll, fall
+  time, jetpack, anchor flags, grounded, `highest_y`, `checkpoint_y`, `dead` and
+  `stunned`. It has no class, carry, injury, unconsciousness or bandage fields.
+- `harpoon_reach` is `14.0` m so holds must be reached progressively. Arms hook
+  layer 1; trampolines are not grappleable. `_ray_exclusions()` excludes the
+  climber's own body and ragdoll parts.
+- Stamina drains only while hanging or climbing and regenerates only on solid
+  ground. Emptying the bar releases all anchors and emits `EXHAUSTED`. Hazard
+  and enemy damage subtract stamina and start a short stun/invulnerability
+  window; neither locks stamina.
+- `_update_fall_dynamics()` grows `fall_time` only while airborne, descending
+  and unanchored. It raises `gravity_scale`, lowers `linear_damp`, caps speed
+  with `fall_speed_cap` and widens camera FOV. Landing only resets this state;
+  there is no impact damage. Falling below `FALL_LIMIT_Y = -12.0` emits
+  `died("fall")`.
+- Ragdoll releases arms, freezes the body for a short `ragdoll_duration` and
+  plays the hidden ragdoll rig. `_process_ragdoll()` always calls `recover()`
+  when the timer expires. `recover()` restores an upright transform, clears
+  stun/fall state and grants brief invulnerability.
+- `LeftFoot` / `RightFoot` meshes animate with `walk_cycle`; their contact plane
+  matches the 1.7 m capsule collider, feet only lift upward and toe tilt is
+  compensated so shoes never sink through the floor.
+- The player shadow is a ground-projected blob (`GroundShadow`); arm shadow
+  casting is disabled so ropes do not paint long silhouettes.
+- Local peers read input and simulate physics. Remote peers freeze as kinematic
+  bodies and receive `replicated_position` / `replicated_yaw` through
+  `MultiplayerSynchronizer`; `_apply_remote_transform()` interpolates toward
+  that target instead of letting the synchronizer write physics transforms
+  directly. `respawn_at()` and `recover()` preserve the freeze state.
+- `MultiplayerSynchronizer` replicates identity, stamina, ragdoll, fall time,
+  progress, replicated transform and yaw. It does not replicate class, carry,
+  stretch or condition state.
+- Camera yaw lives in `PlayerCamera.yaw_rad`; `_process` must not reset it.
+- Controls: WASD move, mouse look, LMB/RMB fire arms, Space jump/mantle, wheel
+  winch, Shift jetpack, G remove empty jetpack, T chat, Tab scoreboard, Esc
+  release mouse.
 
-### Physical props (`scripts/game/prop.gd`)
+### Trampolines (`scripts/game/prop.gd`)
+
 - Root: `RigidBody3D`, class `ClimbProp`, group `climb_props`.
-- Kinds: `CRATE`, `PLANK`, `TRAMPOLINE`, `BUCKET`.
-- Host simulates free props and broadcasts `pack_state()` at 20 Hz.
-- `set_carrier(peer_id)` freezes a grabbed prop; `apply_state()` interpolates remote state.
-- `is_fixed` / `set_fixed(value)` turns a crate, plank or trampoline into a static platform (`FREEZE_MODE_STATIC`) with a cyan emissive overlay. `pack_state()` carries the flag as its sixth field, and `fixed_changed(value)` lets visuals react. A fixed prop clears its carrier and cannot be grabbed until released.
-- Trampolines create a local `Area3D` bounce zone that calls `apply_bounce()` on climbers.
-- The bucket starts full and stays a free `RigidBody3D`; it is never frozen until carried. `can_be_grappled()` allows either hand to hook it, and `apply_pull_impulse()` moves and tips it on the host. Host-only spill drains water on tilt, speed or spin and emits `water_changed(value)`. `pack_state()` includes the water amount as its fifth field.
+- `enum Kind { TRAMPOLINE }`; `kind` defaults to `TRAMPOLINE`. There are no
+  crate, plank, bucket, water, carrier or fixed states.
+- Props are frozen static bodies on the host and peers. `apply_state()` accepts
+  `[prop_id, transform, linear, angular]` from `rpc_prop_states`.
+- Each trampoline builds a local `Area3D` bounce zone on layer 4 with mask 2.
+  A body with `apply_bounce()` triggers a per-body 700 ms cooldown and receives
+  `Vector3.UP * bounce_impulse` plus a `TRAMPOLINE` notice.
+- `can_be_grappled()` is always false and `apply_pull_impulse()` is inert.
 
-### Item pickups (`scripts/game/item_pickup.gd`)
+### Jetpack pickups (`scripts/game/item_pickup.gd`)
+
 - Root: `Area3D`, class `ClimbItemPickup`, group `climb_items`.
-- `Kind { JETPACK, BANDAGE }`. `setup(item_id, amount, kind)` configures it; jetpacks use the amount as fuel, bandages as count.
-- Touch is confirmed by the host, which sends `rpc_item_taken(item_id, receiver_id, amount)`.
-- `set_taken(true)` hides the pickup globally; only the receiver equips/refills the jetpack or adds bandages.
+- Only `item_id`, `fuel_amount` and `taken` exist; there is no kind enum and no
+  bandage branch.
+- `setup(id: String, fuel: float)` configures the pickup. Touch asks the host to
+  reserve it; the host confirms with `rpc_item_taken(item_id, receiver_id,
+  amount)` and `set_taken(true)` hides it globally.
+- The receiver calls `equip_jetpack(amount)`; an empty jetpack can be removed
+  with `remove_jetpack()`.
 
-### Game manager (`scripts/game/game_manager.gd`)
-- Scene `res://scenes/game.tscn`, root `Game` with children `Level`, `Players`, `HUD`, `MultiplayerSpawner` (`spawn_path="../Players"`)
-- Spawn function uses peer id as data, configures each `Climber` from `Net.player_data(peer_id)`, sets multiplayer authority to that peer, places at generated spawn points.
-- Lobby clients toggle a READY button; the host has no ready step and starts the match directly with START MATCH.
-- Host owns countdown, match timer, scores, checkpoints, winner, chat relay, carry links, bandage revives, prop states, fixed/unfixed props and item pickups, and broadcasts state with `@rpc`. Falls add a time penalty; there are no lives.
-- Carry RPCs: `rpc_request_carry`, `rpc_request_drop`, `rpc_apply_carry`; watchdog drops invalid links. `_authorize_carry()` enforces the class rule: downed targets may be carried by anyone, awake targets only by a Strong carrying an Elastic. The Strong carries an awake Elastic in both hands; `Q` sends `request_throw_elastic()` and `_clear_carry_link()` launches the passenger with `launch_from_carry()` at `STRONG_THROW_UP = 22.0`, while `F` still drops gently. `request_quick_throw()` / `rpc_request_quick_throw()` let `Q` lift and launch a nearby awake Elastic in one host-validated action, with the same carry reach and sender check. `Climber.can_climb()` returns true only for Strong: `_process_climb()` releases Elastic anchors, skips grapple/winch input and arm forces, and `_fire_arm()` refuses with a notice. The Elastic only tensions its tail for the Strong to hook.
-- Character assignment is host-authoritative: `Net.assign_character_types()` sets the host to Strong and alternates guests in `_join_order` (first Elastic, second Strong, third Elastic). There is no local class selector and no `_rpc_register_character()`. `_rpc_register_name()` only carries the name; `_rpc_apply_lobby()` includes `character_type` in every player entry and updates the local mirror, and `_spawn_climber()` passes it into `Climber.configure()`. `scripts/game/character_type.gd` defines the shared constants (`STRONG = 0`, `ELASTIC = 1`).
-- `Net.has_both_classes()` remains the match gate. `start_match()` refuses to start with fewer than two climbers or with an unexpected single-class roster, emitting `match_start_rejected(reason)`. The lobby disables START MATCH and explains the requirement; classes are recomputed on join and disconnect so the duo survives roster changes.
-- Revive RPCs: `request_bandage_revive` / `rpc_request_bandage_revive` carry the helper's id to the host, which checks target distance (`REVIVE_REACH = 4.6`), downed state and carry ownership, clears an active carry link, then broadcasts `rpc_apply_bandage_revive`. The bandage itself is spent on the helping client before the request.
-- Coop build RPCs: `rpc_request_fix` and `rpc_apply_prop_fixed`. `_authorize_fix()` rejects the bucket, a fixer farther than `FIX_REACH` and the carrier of the held prop; fixing a carried prop clears that carry link first. Releasing is allowed for any nearby climber.
-- Item RPCs: `rpc_request_item`, `rpc_item_taken`.
-- Prop RPCs: `rpc_report_carried_prop`, `rpc_report_prop_pull`, `rpc_prop_states`, `rpc_apply_prop_fixed`.
-- Level generator builds a seeded procedural mountain heightfield with a concave collider, then pins irregular ledges, overhangs, hazards, checkpoints, summit, the starting cabin, rocks, a narrow harder pillar, low-poly props, the water bucket, jetpack pickups, bandage pickups and patrolling enemy drones to that slope. The host chooses the seed per match and sends it with the start RPC so every peer builds the same mountain. `get_house_position()` returns the delivery point. `Prop` water level is host-authoritative and travels in the prop-state packets.
-- `scripts/game/enemy.gd` defines `ClimbEnemy`, an `Area3D` drone on a deterministic local route. It emits `enemy_hit(body)`; hits are applied locally by each peer via `apply_hazard()` and `set_current_stamina()`, so no replication is required. `hazard.gd` exposes `Type.ENEMY` for its notices.
-- GLB models are `jetpack.glb`, `trampoline.glb`, `plank.glb`, `crate.glb`, `bandage.glb`, `cabin.glb`, `rock.glb` and `enemy.glb`, all produced by `assets/blender/generate_items.py`. Missing files fall back to engine primitives at runtime, but validation checks that all eight exist.
+### Race manager (`scripts/game/game_manager.gd`)
+
+- Scene `res://scenes/game.tscn`, root `Game` with children `Level`, `Players`,
+  `HUD`, `MultiplayerSpawner` (`spawn_path="../Players"`), `WorldEnvironment`,
+  `DirectionalLight3D` and `Sfx`.
+- Spawn function uses peer id as data, configures each `Climber` from
+  `Net.player_data(peer_id)`, sets multiplayer authority to that peer and places
+  it at `level.get_spawn_point(slot)`.
+- Host owns countdown, timer, altitudes, checkpoints, scores, winner, chat
+  relay, item pickups and prop state. Falls add a time penalty; there are no
+  lives.
+- Phases: `PHASE_COUNTDOWN = 0`, `PHASE_ACTIVE = 1`, `PHASE_ENDED = 2`.
+  Countdown is 3 seconds; `MATCH_DURATION = 300.0`; `STATE_INTERVAL = 0.1`;
+  `PROP_STATE_INTERVAL = 0.05`.
+- `_update_altitudes()` keeps each racer's highest observed altitude. `_score_for()`
+  returns `round(altitude * 10) - round(penalty)`. `_best_player_id()` breaks
+  score ties by altitude.
+- `_on_summit_for_peer(pid)` accepts a summit from the level hazard or a climber
+  signal and immediately calls `_finish_match(pid, "SUMMIT")`.
+- `_handle_death(reason, pid)` adds `RESPAWN_PENALTY` during an active phase,
+  announces the penalty and respawns the racer at
+  `level.get_checkpoint_position(checkpoint_y)` after 1.2 seconds.
+- `_finish_match()` freezes the phase, finalises scores, announces the winner,
+  plays the summit/go sound and broadcasts state. At timeout it is called with
+  `_best_player_id()` and reason `TIME UP`.
+- State fields: `phase`, `time_left`, `countdown`, `players`, `winner`,
+  `winner_name`, `reason`, `local_peer_id`, `is_host`. Each player entry has
+  `peer_id`, `name`, `color`, `highest_y`, `checkpoint_y`, `penalty` and `score`.
+- RPCs: `rpc_game_ready`, `receive_state`, `rpc_prop_states`, `rpc_item_taken`,
+  `rpc_request_item`, `rpc_event`, `rpc_fx`, `rpc_show_go`, `rpc_chat`,
+  `rpc_return_to_menu`.
+- HUD shows time, altitude, phase, stamina, jetpack, live altitude leaderboard,
+  chat, event feed and a winner overlay. There is no health, effort, bandage,
+  carry-slot or mission banner UI.
+
+### Level generator (`scripts/game/level_generator.gd`)
+
+- Deterministic seeded mountain: the host chooses one seed and sends it with the
+  start RPC so every peer builds the same heightfield, concave collider, ledges,
+  overhangs, hazards, checkpoints, summit, props and pickups.
+- `_build_base()` creates a flat start pad at `(0, 0.9, -2)` and four spawn
+  points at `x = -4.5, -1.5, 1.5, 4.5`, `y = 1.95`, `z = -2`. `_height_at()`
+  flattens the same start band so nobody begins on a slope.
+- `_build_props()` places four trampolines at 28 m, 68 m, 96 m and 132 m.
+  `_build_items()` places two jetpacks at 16 m and 82 m.
+- Checkpoints are at 26 m, 64 m and 104 m; `get_checkpoint_position(height)`
+  returns the highest checkpoint at or below the requested height, or the first
+  spawn point.
+- Wind gusts, brittle holds, moving platforms, enemies and the difficult pillar
+  scale with altitude. The summit hazard sits at `SUMMIT_Y = 142.0`.
+- GLB models are `jetpack.glb`, `trampoline.glb`, `rock.glb` and `enemy.glb`,
+  generated by `assets/blender/generate_items.py`. Missing files fall back to
+  engine primitives, but validation checks that all four exist and that the
+  obsolete plank/crate/bandage/cabin models are gone.
+
+### enemies and hazards
+
+- `scripts/game/enemy.gd` defines `ClimbEnemy`, an `Area3D` drone on a
+  deterministic local route. It emits `enemy_hit(body)`; hits are applied
+  locally by each peer with `apply_hazard()` / `apply_enemy_strike()`, so no
+  replication is required.
+- `hazard.gd` exposes hazard kinds for wind, checkpoint and summit. Checkpoints
+  and summit forward the touching body to `GameManager`; wind applies a local
+  impulse and stamina loss.
 
 ## Quality bar
+
 - No TODO/FIXME/placeholder/stub text, no empty source files.
+- No class, carry, bandage, water, tail, solo, ball-mode or manual-stretch APIs.
 - Godot 4.6 headless import and scripts must parse without errors.
 - Gameplay must be understandable from the HUD alone.
-- `tests/run_tests.ps1` runs the import, headless regression harnesses and static checks. Expected result: `RESULT PASSED` with all `failures=0`, `STATIC BAD: 0` and `EMPTY FILES: 0`.
+- `tests/run_tests.ps1` runs the import, headless regression harnesses and static
+  checks. Expected result: `RESULT PASSED` with all `failures=0`, `STATIC BAD: 0`
+  and `EMPTY FILES: 0`.

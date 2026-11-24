@@ -49,6 +49,6 @@ func _process(delta: float) -> bool:
 				_report("HOST")
 				var game := root.get_node_or_null("Game")
 				if game != null:
-					print("HOST carry_links=", game.get("_carry_links"))
+					print("HOST race phase=", game.get("_phase"), " winner=", game.get("_winner_id"), " reason=", game.get("_end_reason"))
 				quit(0)
 	return false

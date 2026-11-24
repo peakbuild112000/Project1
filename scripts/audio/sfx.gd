@@ -46,7 +46,7 @@ func get_stream(name: String) -> AudioStreamWAV:
 			stream = _build_anchor()
 		"shoot", "fire", "launch":
 			stream = _build_shoot()
-		"stretch", "stretch_warning", "overstretch", "warning":
+		"warning", "alert":
 			stream = _build_warning()
 		"ragdoll", "thud", "ragdoll_thud":
 			stream = _build_thud()

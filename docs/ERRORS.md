@@ -759,3 +759,54 @@ Pressing `F` while carrying an awake Elastic applied the same high throw as
 `request_throw_elastic()`, its RPC handler and the quick-throw handler pass
 `true`; `F` drops, carry replacement, respawns and watchdog cleanup keep the
 default and simply release the passenger.
+
+## 36. Cooperative mode had to become a competitive summit race
+
+**Symptom**
+
+The game was still a cooperative climb: a cabin delivery mission with a water
+bucket, three lives, fall damage, bandages, injuries, stamina locks, teammate
+carrying, Strong/Elastic classes, grappleable tails, fixed props and a solo
+entry point. The requested race had no winner condition, no shared flat start
+and no time penalty for falls.
+
+**Cause**
+
+Those mechanics were spread across every layer: `Net` assigned classes and
+started solo matches, `GameManager` tracked lives and mission state, `Climber`
+owned carry links and bandage/backpack fields, `LevelGenerator` built the cabin
+and tutorial signs, and the tests and docs still asserted the old contract.
+
+**Fix**
+
+- `GameManager` now owns a three-phase race: countdown, 300 s active timer,
+  ended. The summit hazard calls `_finish_match(pid, "SUMMIT")` immediately.
+  Timeout uses `_best_player_id()` with reason `TIME UP` and score
+  `altitude * 10 - penalty`. `_handle_death()` adds `RESPAWN_PENALTY = 5.0`
+  seconds and respawns at the last checkpoint; lives, spectators and health
+  were removed.
+- `LevelGenerator` builds a flat start pad at `(0, 0.9, -2)` with four evenly
+  spaced spawn points at `y = 1.95`. The mountain profile flattens the same
+  band, so nobody begins on a slope or inside the rock. The cabin, mission
+  sign, bucket, crates, planks and control drawings were removed. Only four
+  trampolines, two jetpacks, three checkpoints, enemies and the summit remain.
+- `prop.gd` is a static trampoline-only boost pad with a bounce `Area3D`.
+  `item_pickup.gd` only grants jetpack fuel. `Climber` keeps grapple hands,
+  stamina, ragdoll stumbles, feet, camera, jetpack and fall dynamics; carry,
+  bandage, injury, unconsciousness, stretch and class state are gone. Ragdoll
+  always recovers on its own, so a fall never needs a teammate.
+- `Net.start_match()` now refuses lobbies with fewer than two players via
+  `match_start_rejected`. There is no solo transport and no class assignment.
+  Desktop still uses ENet on port `7777`; Web still uses WebRTC with WebSocket
+  signaling.
+- `scripts/game/character_type.gd` and `scripts/player/tail_rope.gd` were
+  deleted, together with the `carry` input action, obsolete GLBs and their
+  Blender generator functions.
+- The HUD shows race time, altitude, stamina, jetpack, leaderboard and winner
+  overlay. It no longer shows health, effort, carry slots, bandages or mission
+  banners. The menu title is `SUMMIT RACE`.
+- Tests and documentation were rewritten around the race contract. A cleanup
+  pass initially left an over-indented `if ragdoll_active:` block in
+  `_process_climb()`, which produced `Parse Error: Expected statement, found
+  "Indent"` at `climber.gd:793`. The indentation was repaired and headless
+  import now completes without script errors.

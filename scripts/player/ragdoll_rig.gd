@@ -74,13 +74,13 @@ func apply_color(color: Color) -> void:
 		visual.material_override = material
 
 
-func activate(body_xform: Transform3D, velocity: Vector3, stretch: float, color: Color) -> void:
+func activate(body_xform: Transform3D, velocity: Vector3, kick: float, color: Color) -> void:
 	apply_color(color)
 	_place(body_xform)
 	_enable_joints()
 
-	var swing: Vector3 = body_xform.basis.x * (stretch * 2.2)
-	var base_impulse: Vector3 = velocity * 0.55 + (Vector3.UP * (1.4 + stretch * 4.2)) + swing
+	var swing: Vector3 = body_xform.basis.x * (kick * 2.2)
+	var base_impulse: Vector3 = velocity * 0.55 + (Vector3.UP * (1.4 + kick * 4.2)) + swing
 	for i in range(parts.size()):
 		var multiplier: float = 1.0 if i < 3 else 0.7
 		parts[i].apply_central_impulse(base_impulse * parts[i].mass * multiplier)

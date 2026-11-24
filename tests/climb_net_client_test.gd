@@ -55,18 +55,10 @@ func _process(delta: float) -> bool:
 		3:
 			if timer > 2.0:
 				var game := root.get_node_or_null("Game")
-				game.call("request_carry", 0, "crate_0")
-				print("CLIENT requested crate carry")
-				step = 4
-				timer = 0.0
-		4:
-			if timer > 3.0:
-				var game := root.get_node_or_null("Game")
 				var local_id: int = net.peer_id
 				var climber = game.get_node("Players").get_node("Climber_%d" % local_id)
-				print("CLIENT carry_kind=", climber.get("carry_kind"), " target=", climber.get("carry_target_id"))
-				game.call("request_drop")
-				print("CLIENT drop requested")
+				print("CLIENT racer=", local_id, " altitude=", climber.get("highest_y"), " jetpack=", climber.get("has_jetpack"))
+				print("CLIENT race phase=", game.get("_phase"))
 				_report("CLIENT")
 				quit(0)
 	return false

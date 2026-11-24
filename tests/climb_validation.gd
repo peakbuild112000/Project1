@@ -1,16 +1,36 @@
 extends SceneTree
 
-const ROOT := "res://"
+## Static and API contract for the competitive first-to-summit race.
 
 var failures: int = 0
+
 
 func fail(msg: String) -> void:
 	push_error(msg)
 	failures += 1
 
+
 func check(cond: bool, msg: String) -> void:
 	if not cond:
 		fail(msg)
+
+
+func source_has(path: String, token: String) -> bool:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		fail("Cannot read " + path)
+		return false
+	var text := file.get_as_text()
+	file.close()
+	return text.contains(token)
+
+
+func property_names(node: Node) -> Array[String]:
+	var names: Array[String] = []
+	for item in node.get_property_list():
+		names.append(str((item as Dictionary).get("name", "")))
+	return names
+
 
 func _initialize() -> void:
 	await process_frame
@@ -31,55 +51,28 @@ func _initialize() -> void:
 
 	var actions := [
 		"arm_left", "arm_right", "jump", "move_forward", "move_back",
-		"move_left", "move_right", "carry", "fix_prop", "jetpack", "bandage",
-		"drop_jetpack", "winch_up", "winch_down", "tail_stretch", "chat", "scoreboard",
+		"move_left", "move_right", "jetpack", "drop_jetpack",
+		"winch_up", "winch_down", "chat", "scoreboard",
 	]
 	for action in actions:
 		check(InputMap.has_action(action), "Missing input action: " + action)
+	for action in ["carry", "fix_prop", "bandage", "tail_stretch"]:
+		check(not InputMap.has_action(action), "Obsolete input action still exists: " + action)
 
 	var net := root.get_node_or_null("Net")
 	check(net != null, "Net autoload missing")
 	if net != null:
-		check(not net.has_method("start_solo"), "Solo match entry point must be removed")
-		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data", "has_both_classes", "class_for_join_index", "assign_character_types"]:
+		for method in ["create_server", "join_server", "create_web_room", "join_web_room", "start_match", "leave", "set_ready", "send_chat", "player_data"]:
 			check(net.has_method(method), "Net missing method: " + method)
-		check(not net.has_method("set_character_type"), "Manual class setter must be removed")
-		check(int(net.call("class_for_join_index", 0)) == CharacterType.ELASTIC, "First guest must be Elastic")
-		check(int(net.call("class_for_join_index", 1)) == CharacterType.STRONG, "Second guest must be Strong")
-		check(int(net.call("class_for_join_index", 2)) == CharacterType.ELASTIC, "Third guest must be Elastic")
-		var saved_players: Dictionary = net.get("players")
-		var saved_join_order: Array = net.get("_join_order")
-		var saved_is_host: bool = bool(net.get("is_host"))
-		var saved_host_peer: int = int(net.get("peer_id"))
-		var auto_roster: Dictionary[int, Dictionary] = {}
-		auto_roster[1] = {"name": "Host", "character_type": CharacterType.ELASTIC}
-		auto_roster[2] = {"name": "Guest A", "character_type": CharacterType.STRONG}
-		auto_roster[3] = {"name": "Guest B", "character_type": CharacterType.STRONG}
-		net.set("players", auto_roster)
-		var guest_order: Array[int] = [2, 3]
-		net.set("_join_order", guest_order)
-		net.set("is_host", true)
-		net.set("peer_id", 1)
-		net.call("assign_character_types")
-		check(int((net.get("players")[1] as Dictionary).get("character_type", -1)) == CharacterType.STRONG, "Host was not forced to Strong")
-		check(int((net.get("players")[2] as Dictionary).get("character_type", -1)) == CharacterType.ELASTIC, "First guest was not forced to Elastic")
-		check(int((net.get("players")[3] as Dictionary).get("character_type", -1)) == CharacterType.STRONG, "Second guest was not forced to Strong")
-		check(int(net.get("character_type")) == CharacterType.STRONG, "Local class mirror was not updated")
-		net.set("players", saved_players)
-		net.set("_join_order", saved_join_order)
-		net.set("is_host", saved_is_host)
-		net.set("peer_id", saved_host_peer)
+		for method in ["start_solo", "set_character_type", "has_both_classes", "class_for_join_index", "assign_character_types"]:
+			check(not net.has_method(method), "Obsolete Net method still exists: " + method)
+		check(int(net.get("port")) == 7777, "Desktop ENet port must be 7777")
+		check(int(net.get("max_players")) == 4, "Race lobby must cap at four players")
 		check(net.has_signal("match_start_rejected"), "Net missing match_start_rejected signal")
-		# A lobby where everyone picked the same class cannot start a match.
-		var same_class: Dictionary[int, Dictionary] = {}
-		same_class[1] = {"character_type": CharacterType.STRONG}
-		same_class[2] = {"character_type": CharacterType.STRONG}
-		net.set("players", same_class)
-		check(not bool(net.call("has_both_classes")), "Same-class lobby was accepted")
-		same_class[2] = {"character_type": CharacterType.ELASTIC}
-		net.set("players", same_class)
-		check(bool(net.call("has_both_classes")), "Mixed-class lobby was rejected")
-		net.set("players", saved_players)
+		var net_source := "res://scripts/network/network_manager.gd"
+		check(source_has(net_source, "players.size() < 2"), "Start gate must use the player count")
+		for token in ["start_solo", "character_type", "has_both_classes", "assign_character_types", "ENetMultiplayerPeer.create_server()"]:
+			check(not source_has(net_source, token), "Obsolete Net token still exists: " + token)
 		var rtc := net.get_node_or_null("WebRTCRoom")
 		check(rtc != null, "Net missing WebRTCRoom transport")
 		if rtc != null:
@@ -90,40 +83,24 @@ func _initialize() -> void:
 	if climber_scene != null:
 		var climber := climber_scene.instantiate() as Node
 		root.add_child(climber)
-		for method in ["configure", "respawn_at", "apply_hazard", "get_state", "add_bandage", "use_bandage", "use_bandage_on_target", "find_bandage_target", "revive_with_bandage", "set_persistent_unconscious", "apply_fall_impact", "usable_max_stamina", "set_stamina_lock", "get_total_weight", "remove_jetpack", "find_fix_target", "is_critically_damaged", "get_death_time_left", "is_strong", "is_elastic", "can_carry_climber", "launch_from_carry", "rpc_carry_launch", "release_tail_anchor", "_request_carry"]:
+		for method in ["configure", "respawn_at", "apply_hazard", "apply_bounce", "get_state", "usable_max_stamina", "get_total_weight", "equip_jetpack", "remove_jetpack", "can_climb", "start_ragdoll", "recover"]:
 			check(climber.has_method(method), "Climber missing method: " + method)
-		for prop in ["peer_id", "display_name", "player_color", "character_type", "current_stamina", "max_stamina", "stamina_lock", "stretch", "ragdoll_active", "unconscious", "persistent_unconscious", "unconscious_time", "death_progress", "fall_time", "highest_y", "checkpoint_y", "is_local", "injury", "bandages"]:
-			check(climber.get(prop) != null or climber.get_property_list().any(func(p): return p.name == prop), "Climber missing property: " + prop)
-		for sig in ["stamina_changed", "stamina_lock_changed", "stretch_changed", "ragdoll_started", "ragdoll_ended", "unconscious_changed", "revived", "died", "checkpoint_reached", "summit_reached", "bandages_changed", "injury_changed", "fall_damage", "notice_requested"]:
+		for method in ["add_bandage", "use_bandage", "use_bandage_on_target", "set_character_type", "apply_fall_impact", "set_stamina_lock", "find_fix_target", "can_carry_climber", "_request_carry", "_hands_full_with_bucket"]:
+			check(not climber.has_method(method), "Obsolete climber method still exists: " + method)
+		var props := property_names(climber)
+		for prop in ["peer_id", "display_name", "player_color", "current_stamina", "max_stamina", "ragdoll_active", "fall_time", "highest_y", "checkpoint_y", "is_local", "has_jetpack", "jetpack_fuel"]:
+			check(props.has(prop), "Climber missing property: " + prop)
+		for prop in ["character_type", "stamina_lock", "stretch", "unconscious", "persistent_unconscious", "injury", "bandages", "carry_kind", "carried_by_peer"]:
+			check(not props.has(prop), "Obsolete climber property still exists: " + prop)
+		for sig in ["stamina_changed", "ragdoll_started", "ragdoll_ended", "died", "checkpoint_reached", "summit_reached", "jetpack_changed", "notice_requested"]:
 			check(climber.has_signal(sig), "Climber missing signal: " + sig)
-		check(int(climber.get("bandages")) == 0, "Climbers must start without bandages")
+		for sig in ["stamina_lock_changed", "stretch_changed", "unconscious_changed", "revived", "bandages_changed", "injury_changed", "fall_damage", "carry_changed"]:
+			check(not climber.has_signal(sig), "Obsolete climber signal still exists: " + sig)
+		check(is_equal_approx(float(climber.call("usable_max_stamina")), float(climber.get("max_stamina"))), "Falls must not lock stamina")
 		check(float(climber.get("harpoon_reach")) <= 14.0, "Arm reach must stay reduced")
 		check(climber.find_child("LeftFoot", true, false) != null, "Climber missing left foot")
 		check(climber.find_child("RightFoot", true, false) != null, "Climber missing right foot")
-		var tail: Node = null
-		for node in climber.find_children("*", "", true, false):
-			if node.has_method("set_carrier") and node.has_method("can_be_grappled"):
-				tail = node
-				break
-		check(tail != null, "Climber missing grappling tail")
-		if tail != null:
-			check(tail.has_method("set_carrier"), "Tail cannot be carried")
-			check(tail.has_method("can_be_grappled"), "Tail cannot be grappled")
-			check(tail.has_method("set_tension"), "Tail cannot be tensioned")
-			check(tail.has_method("rpc_release_tail_slack"), "Reliable rope slack release missing")
-			check(int(tail.get("tension_version")) >= 0, "Tail tension has no version")
-		check(climber.has_method("can_carry_climber"), "Climber cannot lift a teammate")
-		check(climber.has_method("can_climb"), "Climber has no class climb gate")
-		check(float(climber.get("elastic_fall_damage_scale")) <= 0.6, "Elastic fall damage must be reduced")
-		check(float(climber.get("elastic_fall_safe_speed_bonus")) >= 1.0, "Elastic needs a higher safe landing speed")
-		var saved_type := int(climber.get("character_type"))
-		climber.call("set_character_type", CharacterType.ELASTIC)
-		check(not bool(climber.call("can_climb")), "Elastic must not be able to climb")
-		climber.call("_fire_arm", true)
-		check(not bool((climber.get("left_anchor") as Object).get("anchored")), "Elastic fired a grappling hand")
-		climber.call("set_character_type", CharacterType.STRONG)
-		check(bool(climber.call("can_climb")), "Strong must be able to climb")
-		climber.call("set_character_type", saved_type)
+		check(climber.find_child("Tail", true, false) == null, "Class rope tail must be removed")
 		var ragdoll := climber.find_child("RagdollRig", true, false)
 		check(ragdoll != null, "Climber missing ragdoll rig")
 		if ragdoll != null:
@@ -131,8 +108,8 @@ func _initialize() -> void:
 				var part := ragdoll.find_child(part_name, true, false) as RigidBody3D
 				check(part != null and int(part.get("collision_layer")) == 0 and int(part.get("collision_mask")) == 0, "Inactive ragdoll part %s still collides" % part_name)
 		var shape_node := climber.find_child("CollisionShape3D", true, false) as CollisionShape3D
-		check(shape_node != null, "Climber missing body collider")
 		var body_mesh_node := climber.get("body_mesh") as MeshInstance3D
+		check(shape_node != null, "Climber missing body collider")
 		check(body_mesh_node != null, "Climber missing body mesh")
 		if shape_node != null and body_mesh_node != null:
 			var body_shape := shape_node.shape as CapsuleShape3D
@@ -160,22 +137,6 @@ func _initialize() -> void:
 								var foot_bottom := foot_mesh.position.y - extent
 								check(foot_bottom >= collider_bottom - 0.02, "Foot sinks below the collider at phase %d" % phase)
 						climber.set("walk_cycle", saved_cycle)
-		check(climber.has_method("_hands_full_with_bucket"), "Bucket two-hand hold missing")
-		check(float(climber.get("unconscious_death_time")) > 0.0, "Unconscious death timer missing")
-		check(int(climber.get("character_type")) == CharacterType.STRONG, "Climbers default to Strong")
-		check(bool(climber.call("is_strong")), "Default climber is not Strong")
-		check(not bool(climber.call("is_elastic")), "Default climber is Elastic")
-		check(float(climber.get("tail_tension_drain")) > 0.0, "Tail tension drain missing")
-		climber.call("set_character_type", CharacterType.ELASTIC)
-		check(bool(climber.call("is_elastic")), "set_character_type did not switch to Elastic")
-		check(int(climber.call("get_state").get("character_type", -1)) == CharacterType.ELASTIC, "Type not replicated in state")
-		climber.call("set_character_type", CharacterType.STRONG)
-		climber.call("set_stamina_lock", 0.0)
-		climber.call("apply_fall_impact", 14.0, 0.0)
-		var short_lock: float = float(climber.get("stamina_lock"))
-		climber.call("set_stamina_lock", 0.0)
-		climber.call("apply_fall_impact", 14.0, 2.0)
-		check(float(climber.get("stamina_lock")) > short_lock, "Long falls must lock more stamina than short falls")
 		climber.call("_reset_fall_state")
 		climber.set("linear_velocity", Vector3(0.0, -5.0, 0.0))
 		climber.call("_update_fall_dynamics", 0.5, false)
@@ -190,43 +151,58 @@ func _initialize() -> void:
 			break
 		check(sync != null, "Climber missing MultiplayerSynchronizer")
 		if sync != null:
-			check(sync.replication_config.get_properties().size() >= 8, "Synchronizer has too few properties")
+			var sync_props: Array = sync.replication_config.get_properties()
+			check(sync_props.size() >= 8, "Synchronizer has too few properties")
+			var sync_text := str(sync_props)
+			for token in ["stretch", "carry", "character_type"]:
+				check(not sync_text.contains(token), "Synchronizer still replicates " + token)
+		climber.free()
 
 	var prop_script = load("res://scripts/game/prop.gd")
 	if prop_script != null:
 		var prop_instance = prop_script.new()
-		check(prop_instance.has_method("set_fixed"), "ClimbProp missing set_fixed")
-		check(prop_instance.has_signal("fixed_changed"), "ClimbProp missing fixed_changed")
+		check(int(ClimbProp.Kind.TRAMPOLINE) == 0, "Trampoline must be the only prop kind")
+		check(not prop_instance.has_method("set_water"), "Prop still exposes water state")
+		check(not prop_instance.has_signal("fixed_changed"), "Prop can still be anchored")
 		prop_instance.free()
+
+	var item_script = load("res://scripts/game/item_pickup.gd")
+	if item_script != null:
+		var item_instance = item_script.new()
+		check(item_instance.has_method("setup"), "Pickup missing setup")
+		check(not item_instance.has_method("add_bandage"), "Pickup still grants bandages")
+		item_instance.free()
 
 	var manager_script = load("res://scripts/game/game_manager.gd")
 	if manager_script != null:
 		var manager_instance = manager_script.new()
-		check(manager_instance.has_method("request_bandage_revive"), "GameManager missing bandage revive request")
-		check(manager_instance.has_method("_find_tail_by_owner"), "GameManager missing tail lookup")
-		check(manager_instance.has_method("is_strong_climber"), "GameManager missing Strong check")
-		check(manager_instance.has_method("is_elastic_climber"), "GameManager missing Elastic check")
+		for method in ["_finish_match", "_best_player_id", "_score_for", "_handle_death"]:
+			check(manager_instance.has_method(method), "GameManager missing method: " + method)
+		for method in ["request_carry", "request_bandage_revive", "report_prop_pull", "is_strong_climber", "is_elastic_climber"]:
+			check(not manager_instance.has_method(method), "Obsolete GameManager method still exists: " + method)
+		var constants: Dictionary = manager_script.get_script_constant_map()
+		check(int(constants.get("MATCH_DURATION", 0)) == 300, "Race duration must be 300 seconds")
+		check(is_equal_approx(float(constants.get("RESPAWN_PENALTY", 0.0)), 5.0), "Fall penalty must be five seconds")
 		manager_instance.free()
 
-	for script_path in ["res://scripts/network/network_manager.gd", "res://scripts/ui/main_menu.gd"]:
-		var file := FileAccess.open(script_path, FileAccess.READ)
-		check(file != null, "Cannot read " + script_path)
-		if file != null:
-			var source := file.get_as_text()
-			check(not source.contains("start_solo"), "Solo mode still present in " + script_path)
-			file.close()
+	for script_path in ["res://scripts/network/network_manager.gd", "res://scripts/game/game_manager.gd", "res://scripts/player/climber.gd", "res://scripts/ui/main_menu.gd", "res://scripts/ui/hud.gd"]:
+		for token in ["start_solo", "CharacterType", "character_type", "add_bandage", "tail_stretch", "fix_prop", "bucket_0", "_carry_links"]:
+			check(not source_has(script_path, token), "Obsolete token " + token + " still exists in " + script_path)
 
 	for model in [
 		"res://assets/models/jetpack.glb",
 		"res://assets/models/trampoline.glb",
-		"res://assets/models/plank.glb",
-		"res://assets/models/crate.glb",
-		"res://assets/models/bandage.glb",
-		"res://assets/models/cabin.glb",
 		"res://assets/models/rock.glb",
 		"res://assets/models/enemy.glb",
 	]:
 		check(ResourceLoader.exists(model), "Missing model: " + model)
+	for model in [
+		"res://assets/models/plank.glb",
+		"res://assets/models/crate.glb",
+		"res://assets/models/bandage.glb",
+		"res://assets/models/cabin.glb",
+	]:
+		check(not ResourceLoader.exists(model), "Obsolete model still exists: " + model)
 
 	print("CLIMB VALIDATION failures=", failures)
 	quit(0 if failures == 0 else 1)

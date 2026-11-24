@@ -1,28 +1,29 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=5 format=3 uid="uid://d04nrncqldvbv"]
 
-[ext_resource type="Script" path="res://scripts/game/game_manager.gd" id="1_game"]
-[ext_resource type="Script" path="res://scripts/game/level_generator.gd" id="2_level"]
-[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="3_hud"]
-[ext_resource type="Script" path="res://scripts/audio/sfx.gd" id="4_sfx"]
+[ext_resource type="Script" uid="uid://bq6hle8tl0xgx" path="res://scripts/game/game_manager.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://b101bw6e7e1sd" path="res://scripts/game/level_generator.gd" id="2_level"]
+[ext_resource type="Script" uid="uid://7yq15duqqs6w" path="res://scripts/ui/hud.gd" id="3_hud"]
+[ext_resource type="Script" uid="uid://cqx4jeea0phc" path="res://scripts/audio/sfx.gd" id="4_sfx"]
 
-[node name="Game" type="Node3D"]
+[node name="Game" type="Node3D" unique_id=976786975]
 script = ExtResource("1_game")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1616729675]
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=382511607]
+transform = Transform3D(1, 0, 0, 0, -4.371139e-08, 1, 0, -1, -4.371139e-08, 0, 10.219754, 0)
 
-[node name="Level" type="Node3D" parent="."]
+[node name="Level" type="Node3D" parent="." unique_id=2132687473]
 script = ExtResource("2_level")
 
-[node name="Players" type="Node3D" parent="."]
+[node name="Players" type="Node3D" parent="." unique_id=1030546987]
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=732665860]
 script = ExtResource("3_hud")
 
-[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="."]
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="." unique_id=1120199825]
 spawn_path = NodePath("../Players")
 spawnable_scenes = PackedStringArray("res://scenes/climber.tscn")
 
-[node name="Sfx" type="Node" parent="."]
+[node name="Sfx" type="Node" parent="." unique_id=1342667572]
 script = ExtResource("4_sfx")

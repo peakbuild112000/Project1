@@ -1,10 +1,9 @@
 extends CanvasLayer
 class_name GameHUD
 
-## Code-built gameplay HUD. Only the local climber drives the stamina, jetpack
-## and ragdoll readouts; the match data comes from the host snapshot. There is no
-## health or effort bar: damage is paid with stamina. Fall damage stays as a red
-## locked slice of the stamina bar until a bandage restores it.
+## Code-built race HUD. Altitude, timer and leaderboard come from the host
+## snapshot; the local climber only drives stamina, jetpack and ragdoll readouts.
+## Falls do not damage; the first climber to the summit wins.
 
 signal chat_submitted(text: String)
 
@@ -18,14 +17,8 @@ var _ui: Control
 var _time_label: Label
 var _alt_label: Label
 var _phase_label: Label
-var _water_label: Label
 var _stamina_fill: ColorRect
-var _stamina_lock_fill: ColorRect
-var _fix_label: Label
 var _jetpack_label: Label
-var _load_label: Label
-var _type_label: Label
-var _bandage_label: Label
 var _jetpack_remove_button: Button
 var _ragdoll_banner: Label
 var _recover_banner: Label
@@ -122,11 +115,9 @@ func _build_top_bar() -> void:
 	_time_label = _make_label("TIME 05:00", 22, ACCENT_COLOR)
 	_alt_label = _make_label("ALT 0.0 m", 20)
 	_phase_label = _make_label("GET READY", 18, Color(1.0, 0.86, 0.45))
-	_water_label = _make_label("WATER --", 18, Color(0.5, 0.85, 1.0))
 	row.add_child(_time_label)
 	row.add_child(_alt_label)
 	row.add_child(_phase_label)
-	row.add_child(_water_label)
 
 
 func _build_crosshair() -> void:
@@ -174,24 +165,9 @@ func _build_bars() -> void:
 	_ui.add_child(box)
 	var stamina: Dictionary = _make_bar("STAMINA", Color(0.28, 0.85, 0.62))
 	_stamina_fill = stamina["fill"]
-	# Red right-hand slice: stamina permanently lost to falls until a bandage.
-	_stamina_lock_fill = ColorRect.new()
-	_stamina_lock_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_stamina_lock_fill.color = Color(0.95, 0.18, 0.16, 0.95)
-	_stamina_lock_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	(stamina["track"] as ColorRect).add_child(_stamina_lock_fill)
 	box.add_child(stamina["root"])
-	_fix_label = _make_label("E: FIX OBJECT", 13, Color(0.42, 1.0, 0.78))
-	_fix_label.visible = false
-	box.add_child(_fix_label)
 	_jetpack_label = _make_label("JETPACK: NONE", 13, ACCENT_COLOR)
 	box.add_child(_jetpack_label)
-	_load_label = _make_label("LOAD 0 kg", 13, TEXT_COLOR)
-	box.add_child(_load_label)
-	_type_label = _make_label("CLASS STRONG", 13, Color(0.62, 0.82, 1.0))
-	box.add_child(_type_label)
-	_bandage_label = _make_label("BANDAGES 0  [B]", 13, Color(1.0, 0.72, 0.65))
-	box.add_child(_bandage_label)
 	_jetpack_remove_button = Button.new()
 	_jetpack_remove_button.text = "REMOVE EMPTY JETPACK  [G]"
 	_jetpack_remove_button.visible = false
@@ -216,7 +192,7 @@ func _build_banners() -> void:
 	_go_label.offset_bottom = 10
 	_go_label.visible = false
 	_ui.add_child(_go_label)
-	_ragdoll_banner = _make_label("UNCONSCIOUS - NEEDS A BANDAGE", 30, WARNING_COLOR, HORIZONTAL_ALIGNMENT_CENTER)
+	_ragdoll_banner = _make_label("STUMBLE", 30, WARNING_COLOR, HORIZONTAL_ALIGNMENT_CENTER)
 	_ragdoll_banner.set_anchors_preset(Control.PRESET_CENTER)
 	_ragdoll_banner.offset_left = -330
 	_ragdoll_banner.offset_right = 330
@@ -389,15 +365,6 @@ func update_state(state: Dictionary) -> void:
 	var whole := int(time_left)
 	_time_label.text = "TIME %02d:%02d" % [whole / 60, whole % 60]
 	_phase_label.text = "GET READY" if phase == 0 else ("CLIMB" if phase == 1 else "MATCH OVER")
-	var water := float(state.get("bucket_water", -1.0))
-	if water < 0.0:
-		_water_label.text = "WATER --"
-	else:
-		_water_label.text = "WATER %d%%" % int(water)
-		_water_label.add_theme_color_override(
-			"font_color",
-			WARNING_COLOR if water < 25.0 else Color(0.5, 0.85, 1.0)
-		)
 	var players: Array = state.get("players", [])
 	var local_id := int(state.get("local_peer_id", 0))
 	var local_entry: Dictionary = {}
@@ -452,8 +419,7 @@ func _update_winner(state: Dictionary, players: Array) -> void:
 	var winner_id := int(state.get("winner", 0))
 	var winner_name := str(state.get("winner_name", "Climber"))
 	var reason := str(state.get("reason", "TIME UP"))
-	var prefix := "WATER DELIVERED" if reason == "WATER DELIVERED" else "SUMMIT"
-	_winner_title.text = ("%s - %s WINS!" % [prefix, winner_name]) if winner_id > 0 else "TIME UP!"
+	_winner_title.text = ("SUMMIT - %s WINS!" % winner_name) if winner_id > 0 else "TIME UP!"
 	_winner_details.text = "%s\n\n" % reason
 	var ordered: Array = players.duplicate(true)
 	ordered.sort_custom(_sort_by_score)
@@ -493,13 +459,7 @@ func _set_fill(fill: ColorRect, ratio: float) -> void:
 	fill.offset_right = 0.0
 
 
-func _set_lock_fill(fill: ColorRect, ratio: float) -> void:
-	var bounded: float = clampf(ratio, 0.0, 1.0)
-	fill.anchor_left = 1.0 - bounded
-	fill.anchor_right = 1.0
-	fill.offset_left = 0.0
-	fill.offset_right = 0.0
-	fill.visible = bounded > 0.001
+
 
 
 func _process(delta: float) -> void:
@@ -509,23 +469,7 @@ func _process(delta: float) -> void:
 		if max_stamina <= 0.0:
 			max_stamina = 1.0
 		_set_fill(_stamina_fill, stamina / max_stamina)
-		# Fall damage leaves a red, unusable slice on the right of the bar until
-		# a bandage is spent. Injury only tints the remaining usable stamina.
-		var lock_value: Variant = _local_climber.get("stamina_lock")
-		var locked: float = clampf(float(lock_value) if lock_value != null else 0.0, 0.0, max_stamina)
-		_set_lock_fill(_stamina_lock_fill, locked / max_stamina)
-		var injury := clampf(float(_local_climber.get("injury")), 0.0, 1.0)
-		_stamina_fill.color = Color(0.28, 0.85, 0.62).lerp(Color(0.95, 0.28, 0.2), injury)
-		if _local_climber.has_method("find_fix_target"):
-			var fix_target = _local_climber.call("find_fix_target")
-			if fix_target != null:
-				var action := "RELEASE" if bool(fix_target.get("is_fixed")) else "FIX"
-				_fix_label.text = "E: %s %s" % [action, str(fix_target.get("display_name")).to_upper()]
-				_fix_label.visible = true
-			else:
-				_fix_label.visible = false
-		else:
-			_fix_label.visible = false
+		_stamina_fill.color = Color(0.28, 0.85, 0.62)
 		var has_jetpack := bool(_local_climber.get("has_jetpack"))
 		var fuel := clampf(float(_local_climber.get("jetpack_fuel")), 0.0, 100.0)
 		if has_jetpack:
@@ -537,27 +481,11 @@ func _process(delta: float) -> void:
 			_jetpack_remove_button.visible = empty_jetpack
 			if empty_jetpack:
 				_jetpack_label.text += "  - EMPTY: press G or click REMOVE"
-		var weight := 0.0
-		if _local_climber.has_method("get_total_weight"):
-			weight = float(_local_climber.call("get_total_weight"))
-		_load_label.text = "LOAD %.0f kg" % weight
-		var class_value := int(_local_climber.get("character_type"))
-		_type_label.text = "CLASS %s" % CharacterType.label(class_value)
-		if int(_local_climber.get("carry_kind")) == 1:
-			_type_label.text += "  [F: DROP / Q: THROW]"
-		elif class_value == CharacterType.STRONG:
-			_type_label.text += "  [Q: THROW ELASTIC]"
-		else:
-			_type_label.text += "  [Q: ROPE TAIL / NO CLIMB]"
-		_bandage_label.text = "BANDAGES %d  [B]" % maxi(0, int(_local_climber.get("bandages")))
 		var ragdoll := bool(_local_climber.get("ragdoll_active"))
 		if ragdoll and not _was_ragdoll:
 			_ragdoll_banner.visible = true
 		if ragdoll:
-			var left := 0.0
-			if _local_climber.has_method("get_death_time_left"):
-				left = float(_local_climber.call("get_death_time_left"))
-			_ragdoll_banner.text = "UNCONSCIOUS - BANDAGE! %ds" % int(left) if left > 0.0 else "UNCONSCIOUS - NEEDS A BANDAGE"
+			_ragdoll_banner.text = "STUMBLE"
 		elif not ragdoll and _was_ragdoll:
 			_ragdoll_banner.visible = false
 			_recover_banner.visible = true
@@ -567,11 +495,9 @@ func _process(delta: float) -> void:
 		var pos_value: Variant = _local_climber.get("global_position")
 		if pos_value is Vector3:
 			pos = pos_value as Vector3
-			_live_altitude = maxf(0.0, pos.y - 2.0)
+		_live_altitude = maxf(0.0, pos.y - 2.0)
 		if _last_phase == 1:
 			_alt_label.text = "ALT %.1f m" % maxf(_local_best_altitude, _live_altitude)
-	else:
-		_fix_label.visible = false
 	if _recover_time > 0.0:
 		_recover_time -= delta
 		if _recover_time <= 0.0:
@@ -582,7 +508,6 @@ func _process(delta: float) -> void:
 			_go_label.visible = false
 	_fade_feed(_events, delta)
 	_fade_feed(_chat_lines, delta)
-
 
 func _fade_feed(feed: Array, delta: float) -> void:
 	for i in range(feed.size() - 1, -1, -1):
@@ -632,7 +557,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event is InputEventKey:
-			for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "carry", "jetpack", "arm_left", "arm_right", "winch_up", "winch_down"]:
+			for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "jetpack", "arm_left", "arm_right", "winch_up", "winch_down"]:
 				if InputMap.has_action(action) and InputMap.event_is_action(event, action):
 					get_viewport().set_input_as_handled()
 					break

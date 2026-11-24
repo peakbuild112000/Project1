@@ -5,8 +5,8 @@ Run with:
 
 All geometry uses built-in Blender/bforartists primitives. Coordinates are authored
 Z-up (Blender) and exported Y-up (glTF/Godot), so "height" below is Blender Z.
-The script exports jetpack, trampoline, plank, crate, bandage, cabin, rock and
-enemy models into assets/models.
+The script exports the jetpack, trampoline, rock and enemy models used by the
+summit race into assets/models.
 """
 
 import math
@@ -73,8 +73,6 @@ def init_materials():
     MATS["orange"] = make_material(
         "MAT_OrangeWarning", (0.950, 0.360, 0.070, 1.0), 0.25, 0.45,
         emission=(0.9, 0.3, 0.04), emission_strength=0.25)
-    MATS["wood"] = make_material(
-        "MAT_WarmWood", (0.400, 0.255, 0.135, 1.0), 0.0, 0.85)
     MATS["rubber"] = make_material(
         "MAT_DarkRubber", (0.045, 0.055, 0.070, 1.0), 0.0, 0.90)
     MATS["elastic"] = make_material(
@@ -84,11 +82,6 @@ def init_materials():
     MATS["red"] = make_material(
         "MAT_MedicalRed", (0.900, 0.110, 0.130, 1.0), 0.0, 0.45,
         emission=(0.75, 0.05, 0.06), emission_strength=0.35)
-    MATS["roof"] = make_material(
-        "MAT_RoofShingle", (0.260, 0.170, 0.150, 1.0), 0.0, 0.90)
-    MATS["glass"] = make_material(
-        "MAT_WindowGlass", (0.180, 0.520, 0.680, 1.0), 0.35, 0.18,
-        emission=(0.08, 0.35, 0.5), emission_strength=0.55)
     MATS["stone"] = make_material(
         "MAT_StoneRock", (0.235, 0.255, 0.305, 1.0), 0.0, 0.95)
 
@@ -304,148 +297,11 @@ def build_trampoline():
 # --------------------------------------------------------------------------- #
 # 3. Plank  (3.0 long X, 0.7 wide Y -> 0.7 Z in GLB, 0.18 thick Z -> Y in GLB)
 # --------------------------------------------------------------------------- #
-
-def build_plank():
-    board = cube("PlankBoard", (0, 0, 0), (1.5, 0.35, 0.09),
-                 MATS["wood"], bevel=0.018)
-
-    cube("PlankEdgeL", (0, -0.340, 0), (1.5, 0.022, 0.096), MATS["edge"])
-    cube("PlankEdgeR", (0, 0.340, 0), (1.5, 0.022, 0.096), MATS["edge"])
-    cube("PlankEndCapL", (-1.480, 0, 0), (0.025, 0.360, 0.100), MATS["edge"])
-    cube("PlankEndCapR", (1.480, 0, 0), (0.025, 0.360, 0.100), MATS["edge"])
-
-    # Grip stripes across the top face; orange at the two ends.
-    for idx in range(11):
-        x = -1.25 + 0.25 * idx
-        material = MATS["orange"] if idx in (0, 10) else MATS["cyan"]
-        cube("PlankGripStripe_%02d" % (idx + 1), (x, 0, 0.096),
-             (0.023, 0.300, 0.007), material)
-
-    # Underneath mounting brackets.
-    cube("PlankBracketL", (-1.000, 0, -0.115),
-         (0.090, 0.250, 0.030), MATS["dark"])
-    cube("PlankBracketR", (1.000, 0, -0.115),
-         (0.090, 0.250, 0.030), MATS["dark"])
-
-
-# --------------------------------------------------------------------------- #
 # 4. Crate  (1.1 m cube, origin at center)
-# --------------------------------------------------------------------------- #
-
-def build_crate():
-    body = cube("CrateBody", (0, 0, 0), (0.530, 0.530, 0.530),
-                MATS["dark"], bevel=0.020)
-
-    # Twelve reinforced edge beams.
-    for iz, z in enumerate((-0.515, 0.515)):
-        for iy, y in enumerate((-0.515, 0.515)):
-            cube("CrateFrameX_%d%d" % (iz, iy), (0, y, z),
-                 (0.550, 0.036, 0.036), MATS["edge"])
-    for ix, x in enumerate((-0.515, 0.515)):
-        for iz, z in enumerate((-0.515, 0.515)):
-            cube("CrateFrameY_%d%d" % (ix, iz), (x, 0, z),
-                 (0.036, 0.550, 0.036), MATS["edge"])
-    for ix, x in enumerate((-0.515, 0.515)):
-        for iy, y in enumerate((-0.515, 0.515)):
-            cube("CrateFrameZ_%d%d" % (ix, iy), (x, y, 0),
-                 (0.036, 0.036, 0.550), MATS["edge"])
-
-    # Cyan identification panel on the front (-Y in Blender).
-    cube("CratePanelCyan", (0, -0.537, 0),
-         (0.310, 0.008, 0.230), MATS["cyan"])
-    cube("CratePanelFrame", (0, -0.534, 0),
-         (0.350, 0.006, 0.270), MATS["edge"])
-
-    # Orange warning stripes on the lid.
-    cube("CrateLidStripeL", (-0.270, 0, 0.537),
-         (0.040, 0.460, 0.008), MATS["orange"])
-    cube("CrateLidStripeR", (0.270, 0, 0.537),
-         (0.040, 0.460, 0.008), MATS["orange"])
-
-
 # --------------------------------------------------------------------------- #
 # 5. Bandage  (small medical roll with a red cross, origin at center)
 # --------------------------------------------------------------------------- #
-
-def build_bandage():
-    roll = cylinder("BandageRoll", (0, 0, 0), 0.170, 0.300,
-                    MATS["white"], vertices=16)
-    apply_bevel(roll, 0.022, segments=2)
-    cylinder("BandageCore", (0, 0, 0), 0.075, 0.312,
-             MATS["edge"], vertices=12)
-    cylinder("BandageCapTop", (0, 0, 0.156), 0.174, 0.018,
-             MATS["white"], vertices=16)
-    cylinder("BandageCapBottom", (0, 0, -0.156), 0.174, 0.018,
-             MATS["white"], vertices=16)
-    # Red cross on the top face of the roll.
-    cube("BandageCrossVertical", (0, 0, 0.170),
-         (0.035, 0.150, 0.010), MATS["red"])
-    cube("BandageCrossHorizontal", (0, 0, 0.170),
-         (0.150, 0.035, 0.010), MATS["red"])
-    # Two loose tape ends wrapped around the cylinder.
-    cube("BandageTapeA", (0.155, 0.060, -0.060),
-         (0.030, 0.150, 0.070), MATS["white"], bevel=0.010)
-    cube("BandageTapeB", (-0.155, -0.060, 0.060),
-         (0.030, 0.150, 0.070), MATS["white"], bevel=0.010)
-
-
-# --------------------------------------------------------------------------- #
 # 6. Cabin  (12 x 9 footprint, floor at Blender Z = 0, 5 m tall walls)
-# --------------------------------------------------------------------------- #
-
-def build_cabin():
-    # Floor and low foundation.
-    cube("CabinFloor", (0, 0, 0.150), (5.9, 4.4, 0.150),
-         MATS["wood"])
-    cube("CabinFoundation", (0, 0, 0.030), (6.2, 4.7, 0.040),
-         MATS["dark"])
-
-    # Back wall (+Y in Blender becomes -Z in Godot, facing the mountain).
-    cube("CabinWallBack", (0, 4.35, 2.550), (5.9, 0.240, 2.450),
-         MATS["wood"])
-    cube("CabinWallLeft", (-5.85, 0, 2.550), (0.240, 4.35, 2.450),
-         MATS["wood"])
-    cube("CabinWallRight", (5.85, 0, 2.550), (0.240, 4.35, 2.450),
-         MATS["wood"])
-
-    # Front wall with a central door opening.
-    cube("CabinFrontLeft", (-3.9, -4.35, 2.550), (1.9, 0.240, 2.450),
-         MATS["wood"])
-    cube("CabinFrontRight", (3.9, -4.35, 2.550), (1.9, 0.240, 2.450),
-         MATS["wood"])
-    cube("CabinLintel", (0, -4.35, 4.600), (1.9, 0.240, 0.450),
-         MATS["wood"])
-    cube("CabinDoorFrameL", (-1.95, -4.48, 2.300), (0.100, 0.140, 2.250),
-         MATS["edge"])
-    cube("CabinDoorFrameR", (1.95, -4.48, 2.300), (0.100, 0.140, 2.250),
-         MATS["edge"])
-
-    # Gabled roof made from two sloped slabs.
-    left = cube("CabinRoofLeft", (-3.1, 0, 6.150),
-                (3.4, 4.85, 0.180), MATS["roof"])
-    left.rotation_euler.y = math.radians(16.0)
-    right = cube("CabinRoofRight", (3.1, 0, 6.150),
-                 (3.4, 4.85, 0.180), MATS["roof"])
-    right.rotation_euler.y = math.radians(-16.0)
-    cube("CabinRidge", (0, 0, 7.100), (0.220, 5.0, 0.220),
-         MATS["edge"])
-
-    # Glowing windows and a warm doorway light.
-    for side, x in (("L", -3.9), ("R", 3.9)):
-        cube("CabinWindow%s" % side, (x, -4.49, 2.900),
-             (1.1, 0.030, 1.0), MATS["glass"])
-        cube("CabinWindowSill%s" % side, (x, -4.55, 2.350),
-             (1.3, 0.080, 0.100), MATS["edge"])
-    cube("CabinPorchLamp", (0, -4.55, 4.250),
-         (0.200, 0.120, 0.200), MATS["cyan_bright"])
-
-    # Wooden support posts at the four corners.
-    for sx in (-5.85, 5.85):
-        for sy in (-4.35, 4.35):
-            cube("CabinPost_%s_%s" % (sx, sy), (sx, sy, 2.550),
-                 (0.320, 0.320, 5.100), MATS["dark"])
-
-
 # --------------------------------------------------------------------------- #
 # 7. Rock  (irregular low-poly boulder, origin near the center)
 # --------------------------------------------------------------------------- #
@@ -524,13 +380,9 @@ def main():
     init_materials()
     build_and_export("jetpack.glb", build_jetpack)
     build_and_export("trampoline.glb", build_trampoline)
-    build_and_export("plank.glb", build_plank)
-    build_and_export("crate.glb", build_crate)
-    build_and_export("bandage.glb", build_bandage)
-    build_and_export("cabin.glb", build_cabin)
     build_and_export("rock.glb", build_rock)
     build_and_export("enemy.glb", build_enemy)
-    print("ALL_MODELS_DONE")
+    print("RACE MODELS DONE")
 
 
 if __name__ == "__main__":
