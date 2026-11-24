@@ -2,6 +2,10 @@ extends Node3D
 class_name RagdollRig
 
 const PART_NAMES := ["Hips", "Torso", "Head", "ArmL", "ArmR", "LegL", "LegR"]
+## Inactive ragdoll parts must not collide: they sit near the world origin and
+## otherwise push the standing climber's capsule off the floor invisibly.
+const ACTIVE_COLLISION_LAYER: int = 1
+const ACTIVE_COLLISION_MASK: int = 5
 
 var parts: Array[RigidBody3D] = []
 var joints: Array[PinJoint3D] = []
@@ -39,6 +43,8 @@ func _setup() -> void:
 		body.linear_damp = 1.2
 		body.angular_damp = 2.2
 		body.can_sleep = false
+		body.collision_layer = 0
+		body.collision_mask = 0
 		parts.append(body)
 
 	for link in _links:
@@ -98,6 +104,8 @@ func deactivate() -> void:
 	for part in parts:
 		part.freeze = true
 		part.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		part.collision_layer = 0
+		part.collision_mask = 0
 		part.linear_velocity = Vector3.ZERO
 		part.angular_velocity = Vector3.ZERO
 	visible = false
@@ -160,6 +168,8 @@ func _place(body_xform: Transform3D) -> void:
 		var offset_index: int = mini(i, _rest.size() - 1)
 		part.freeze = false
 		part.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		part.collision_layer = ACTIVE_COLLISION_LAYER
+		part.collision_mask = ACTIVE_COLLISION_MASK
 		part.linear_velocity = Vector3.ZERO
 		part.angular_velocity = Vector3.ZERO
 		part.global_transform = body_xform * Transform3D(Basis.IDENTITY, _rest[offset_index])

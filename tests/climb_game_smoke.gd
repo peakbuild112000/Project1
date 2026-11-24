@@ -161,6 +161,17 @@ func _initialize() -> void:
 		await process_frame
 		check(int(climber1.get("carry_kind")) == -1, "Carry link not cleared")
 
+		# Strong grabs the awake Elastic with F; Q throws them via the new RPC.
+		game.call("request_carry", 1, "2")
+		await process_frame
+		check(int(climber1.get("carry_kind")) == 1, "Strong did not carry the awake Elastic")
+		check(int(climber2.get("carried_by_peer")) == 1, "Elastic was not marked as carried")
+		game.call("request_throw_elastic", 1)
+		await process_frame
+		check(int(climber1.get("carry_kind")) == -1, "Q throw did not clear the carry link")
+		var launch: Vector3 = climber2.get("last_launch_velocity")
+		check(launch.length_squared() > 1.0, "Q throw did not launch the Elastic")
+
 		# Coop building: a carrier cannot anchor their own object, but a nearby
 		# climber can fix and release it. Anchored props cannot be picked up.
 		var build_prop: Node = null

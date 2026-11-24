@@ -543,7 +543,9 @@ func _process(delta: float) -> void:
 		_load_label.text = "LOAD %.0f kg" % weight
 		var class_value := int(_local_climber.get("character_type"))
 		_type_label.text = "CLASS %s" % CharacterType.label(class_value)
-		if class_value == CharacterType.ELASTIC:
+		if int(_local_climber.get("carry_kind")) == 1:
+			_type_label.text += "  [F: DROP / Q: THROW]"
+		elif class_value == CharacterType.ELASTIC:
 			_type_label.text += "  [Q: ROPE TAIL]"
 		_bandage_label.text = "BANDAGES %d  [B]" % maxi(0, int(_local_climber.get("bandages")))
 		var ragdoll := bool(_local_climber.get("ragdoll_active"))

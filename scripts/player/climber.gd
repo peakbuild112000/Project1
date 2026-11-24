@@ -26,6 +26,13 @@ const OVERLOAD_THRESHOLD: float = 0.85
 const OVERLOAD_TIME: float = 1.1
 const FALL_LIMIT_Y: float = -12.0
 const PROP_LAYER_MASK: int = 4
+## The body capsule collider is 1.7 m tall, so its underside is at -0.85.
+## A 0.16 m foot box rests just above that contact plane. Walking lifts feet
+## upward only; tilting raises the centre so a toe never digs into the floor.
+const FOOT_GROUND_Y: float = -0.76
+const FOOT_HALF_HEIGHT: float = 0.08
+const FOOT_HALF_DEPTH: float = 0.21
+const FOOT_TILT_DEGREES: float = 55.0
 
 class ArmAnchor:
 	var anchored: bool = false
@@ -1096,6 +1103,7 @@ func get_total_weight() -> float:
 func _request_carry() -> void:
 	if ragdoll_active or dead or control_disabled:
 		return
+	# A Strong holding an awake Elastic uses Q to throw; F still drops safely.
 	if carried_by_peer > 0:
 		# A passenger can release themselves by pressing F again.
 		_request_drop()
@@ -1216,6 +1224,13 @@ func _request_drop() -> void:
 	var manager := _game_manager()
 	if manager != null and manager.has_method("request_drop"):
 		manager.call("request_drop")
+
+
+func _request_throw_elastic() -> void:
+	var manager := _game_manager()
+	if manager == null or not manager.has_method("request_throw_elastic"):
+		return
+	manager.call("request_throw_elastic", peer_id)
 
 
 func _carry_mass() -> float:
@@ -1346,10 +1361,12 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("drop_jetpack"):
 		remove_jetpack()
 
-	if is_elastic():
+	if is_elastic() and not (is_strong() and carry_kind == 1):
 		_update_tail_tension(delta)
 	elif is_instance_valid(_tail_body) and _tail_body.has_method("set_tension"):
 		_tail_body.call("set_tension", false, Vector3.FORWARD, 0.0)
+	if Input.is_action_just_pressed("tail_stretch") and is_strong():
+		_request_throw_elastic()
 
 	if carried_by_peer > 0:
 		_process_carried(delta)
@@ -1534,7 +1551,9 @@ func is_elastic() -> bool:
 
 
 func can_carry_climber(target: Node) -> bool:
-	if target == null or int(target.get("peer_id")) == peer_id or bool(target.get("dead")):
+	if target == null or self == target or int(target.get("peer_id")) == peer_id or bool(target.get("dead")):
+		return false
+	if int(target.get("carried_by_peer")) > 0:
 		return false
 	if bool(target.get("unconscious")):
 		return true
@@ -2033,11 +2052,18 @@ func _update_foot_visuals(delta: float) -> void:
 	if not is_local:
 		walk_cycle += delta * 10.0 * clampf(Vector3(linear_velocity.x, 0.0, linear_velocity.z).length() / 6.0, 0.0, 1.5)
 	var stride: float = sin(walk_cycle) * 0.18
-	var lift: float = maxf(0.0, cos(walk_cycle)) * 0.12
-	_left_foot.position = Vector3(-0.18, -0.78 + lift, stride)
-	_right_foot.position = Vector3(0.18, -0.78 - lift, -stride)
-	_left_foot.rotation_degrees.x = -stride * 55.0
-	_right_foot.rotation_degrees.x = stride * 55.0
+	var left_lift: float = maxf(0.0, cos(walk_cycle)) * 0.12
+	var right_lift: float = maxf(0.0, -cos(walk_cycle)) * 0.12
+	var tilt: float = deg_to_rad(absf(stride) * FOOT_TILT_DEGREES)
+	var tilt_clearance: float = maxf(
+		0.0,
+		FOOT_HALF_DEPTH * sin(tilt) + FOOT_HALF_HEIGHT * cos(tilt) - FOOT_HALF_HEIGHT
+	)
+	var contact_y: float = FOOT_GROUND_Y + tilt_clearance
+	_left_foot.position = Vector3(-0.18, contact_y + left_lift, stride)
+	_right_foot.position = Vector3(0.18, contact_y + right_lift, -stride)
+	_left_foot.rotation_degrees.x = -stride * FOOT_TILT_DEGREES
+	_right_foot.rotation_degrees.x = stride * FOOT_TILT_DEGREES
 
 
 func _update_arm_visuals(delta: float) -> void:
@@ -2078,9 +2104,11 @@ func _update_arm_visuals(delta: float) -> void:
 
 	if carry_kind != -1 and is_instance_valid(_carry_node):
 		var carry_point: Vector3 = _carry_node.global_position
-		var two_handed: bool = carry_kind == 0 and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET
-		var hand_spread: float = 0.62 if two_handed else 0.16
-		var hand_lift: float = 0.52 if two_handed else 0.0
+		var bucket: bool = carry_kind == 0 and int(_carry_node.get("kind")) == ClimbProp.Kind.BUCKET
+		var teammate: bool = carry_kind == 1
+		var two_handed: bool = bucket or teammate
+		var hand_spread: float = 0.62 if bucket else (0.34 if teammate else 0.16)
+		var hand_lift: float = 0.52 if bucket else (0.2 if teammate else 0.0)
 		left_on = true
 		right_on = true
 		left_point = carry_point - (right * hand_spread) + (Vector3.UP * hand_lift)

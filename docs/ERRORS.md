@@ -622,10 +622,60 @@ anchored to that tail owner before the snap. The final slack is additionally
 sent with the reliable `rpc_release_tail_slack(version)` because the throttled
 tension stream is unreliable; monotonic versions stop an old packet from
 cancelling a newer tension. A thrown tail now keeps layer 4 for
-grapples, adds world layer 1 with mask 1, and uses `CCD_MODE_CAST_SHAPE`.
+grapples, adds world layer 1 with mask 1, and enables Godot 4.6's boolean
+`continuous_cd` for swept shape collision.
 `Climber._request_carry()` checks climbers before tails in both the raycast and
 fallback paths. Classes are now host-assigned by `Net.assign_character_types()`:
 host Strong, guests alternate Elastic/Strong/Elastic by join order; the manual
 selector and `_rpc_register_character()` are removed. Validation and gameplay
 smoke tests cover the auto roster, slack-rope release, thrown-tail collision,
 and `F` priority; the two-process ENet harness confirms auto classes.
+
+## 29. Feet disappeared through the floor
+
+**Symptom**
+
+The climber's shoes visibly sank into the cabin floor and every solid surface,
+especially while walking; the whole body looked slightly buried.
+
+**Cause**
+
+`CapsuleShape3D_body.height` was `0.9`, which in Godot is the *total* capsule
+height, while `CapsuleMesh_body.height` was `1.7` (verified with both debug
+AABBs: `-0.45..0.45` versus `-0.85..0.85`). The physics body therefore rested
+0.4 m above the ground while the visual body reached 0.4 m below it. On top of
+that, the walk animation used `-0.78 - lift` for the trailing foot, pushing it
+another 0.12 m under the visual floor, and foot rotation lowered a toe further.
+The seven hidden ragdoll parts were also live kinematic bodies on the world
+layer near the origin; they pushed the standing capsule up by ~0.23 m and made
+foot/ground contact unreliable.
+
+**Fix**
+
+The body collider height now matches the visible capsule at `1.7`, so the
+standing centre is the correct 0.85 m above the floor. Foot visuals use a
+`FOOT_GROUND_Y` contact plane just above the collider underside, alternate
+upward-only lifts, and add a tilt clearance computed from the shoe box and its
+rotation, so every phase of the walk cycle stays above the floor. Ragdoll parts
+keep collision layers/masks at zero while inactive and restore them only in
+`activate()` / `activate_remote()`. Validation
+compares the collider with the body mesh and sweeps 16 walk phases against the
+collider underside.
+
+## 30. Strong could not throw the carried Elastic with Q
+
+**Symptom**
+
+`F` grabbed and dropped an awake Elastic, but there was no separate hand-throw
+key. `Q` only tensioned the Elastic tail, so a Strong holding a teammate had no
+way to launch them deliberately.
+
+**Fix**
+
+The Strong's hand-held passenger is now drawn with two hands, and `Q` calls the
+new host-authoritative `request_throw_elastic()` RPC. It validates the carry
+link and the Strong/Elastic pair before clearing the link; `_clear_carry_link()`
+applies the existing camera-direction `launch_from_carry()` impulse on the
+owning peer. `F` remains the gentle drop, the HUD advertises both keys while a
+teammate is held, and the Elastic tail ignores `Q` while that teammate is
+carried.

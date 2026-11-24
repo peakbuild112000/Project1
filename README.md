@@ -65,9 +65,10 @@ on UDP port `7777`.
 - Two character classes are assigned automatically: **Strong** and **Elastic**.
   The host is always Strong; guests alternate Elastic, Strong, Elastic in the
   order they join, so a two-player lobby always has both. A Strong climber can
-  grab an awake Elastic teammate with `F`, carry them and press `F` again to
-  throw them forward and high toward the direction the Strong climber is
-  looking. A nearby rope tail never steals that `F` grab. Any class can carry a
+  grab an awake Elastic teammate with `F`, carry them in both hands and press
+  `Q` (QWERTY) to throw them forward and high toward the direction the Strong
+  climber is looking; `F` puts them down gently. A nearby rope tail never steals
+  that `F` grab. Any class can carry a
   downed teammate to safety, but an awake climber can only be lifted by a Strong
   carrying an Elastic.
 - The **Elastic** climber owns a rope tail. Hold `Q` to stretch it into a long

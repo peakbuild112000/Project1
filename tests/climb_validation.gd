@@ -112,6 +112,43 @@ func _initialize() -> void:
 			check(tail.has_method("set_tension"), "Tail cannot be tensioned")
 			check(tail.has_method("rpc_release_tail_slack"), "Reliable rope slack release missing")
 			check(int(tail.get("tension_version")) >= 0, "Tail tension has no version")
+		check(climber.has_method("can_carry_climber"), "Climber cannot lift a teammate")
+		var ragdoll := climber.find_child("RagdollRig", true, false)
+		check(ragdoll != null, "Climber missing ragdoll rig")
+		if ragdoll != null:
+			for part_name in ["Hips", "Torso", "Head", "ArmL", "ArmR", "LegL", "LegR"]:
+				var part := ragdoll.find_child(part_name, true, false) as RigidBody3D
+				check(part != null and int(part.get("collision_layer")) == 0 and int(part.get("collision_mask")) == 0, "Inactive ragdoll part %s still collides" % part_name)
+		var shape_node := climber.find_child("CollisionShape3D", true, false) as CollisionShape3D
+		check(shape_node != null, "Climber missing body collider")
+		var body_mesh_node := climber.get("body_mesh") as MeshInstance3D
+		check(body_mesh_node != null, "Climber missing body mesh")
+		if shape_node != null and body_mesh_node != null:
+			var body_shape := shape_node.shape as CapsuleShape3D
+			var visible_body := body_mesh_node.mesh as CapsuleMesh
+			check(body_shape != null and visible_body != null, "Body collider and mesh must both be capsules")
+			if body_shape != null and visible_body != null:
+				check(absf(body_shape.height - visible_body.height) <= 0.05, "Body collider is shorter than the visible body")
+				check(float(climber.get("ground_ray_length")) >= body_shape.height * 0.5 + 0.2, "Ground ray is too short for the body collider")
+				var left_foot := climber.find_child("LeftFoot", true, false) as MeshInstance3D
+				var right_foot := climber.find_child("RightFoot", true, false) as MeshInstance3D
+				if left_foot != null and right_foot != null:
+					var box := left_foot.mesh as BoxMesh
+					if box != null:
+						var half_h := box.size.y * 0.5
+						var half_d := box.size.z * 0.5
+						var collider_bottom := -body_shape.height * 0.5
+						var saved_cycle := float(climber.get("walk_cycle"))
+						for phase in range(16):
+							climber.set("walk_cycle", TAU * float(phase) / 16.0)
+							climber.call("_update_foot_visuals", 0.0)
+							for foot in [left_foot, right_foot]:
+								var foot_mesh := foot as MeshInstance3D
+								var tilt := deg_to_rad(absf(foot_mesh.rotation_degrees.x))
+								var extent := half_h * cos(tilt) + half_d * sin(tilt)
+								var foot_bottom := foot_mesh.position.y - extent
+								check(foot_bottom >= collider_bottom - 0.02, "Foot sinks below the collider at phase %d" % phase)
+						climber.set("walk_cycle", saved_cycle)
 		check(climber.has_method("_hands_full_with_bucket"), "Bucket two-hand hold missing")
 		check(float(climber.get("unconscious_death_time")) > 0.0, "Unconscious death timer missing")
 		check(int(climber.get("character_type")) == CharacterType.STRONG, "Climbers default to Strong")

@@ -570,6 +570,52 @@ func rpc_apply_prop_fixed(prop_id: String, value: bool) -> void:
 		prop.call("set_fixed", value)
 
 
+## Strong player throws an awake Elastic passenger in the camera direction.
+## The normal F drop stays gentle; Q calls this dedicated RPC instead.
+func request_throw_elastic(carrier_pid: int) -> void:
+	if not _is_authority():
+		rpc_id(1, "rpc_request_throw_elastic", carrier_pid)
+		return
+	var link: Dictionary = _carry_links.get(carrier_pid, {})
+	if int(link.get("kind", -1)) != 1:
+		return
+	var carrier: Node = _find_climber_by_id(carrier_pid)
+	var target: Node = _find_climber_by_id(int(link.get("target_id", -1)))
+	if (
+		carrier == null or target == null
+		or not is_strong_climber(carrier)
+		or not is_elastic_climber(target)
+		or bool(target.get("unconscious"))
+	):
+		return
+	_clear_carry_link(carrier_pid, true)
+	_notify("ELASTIC THROWN")
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_request_throw_elastic(carrier_pid: int) -> void:
+	_authorize_throw_elastic(_peer_of_sender(multiplayer.get_remote_sender_id()), carrier_pid)
+
+
+func _authorize_throw_elastic(sender_pid: int, carrier_pid: int) -> void:
+	if not _is_authority() or sender_pid != carrier_pid:
+		return
+	if not _carry_links.has(carrier_pid):
+		return
+	var carrier: Node = _find_climber_by_id(carrier_pid)
+	var link: Dictionary = _carry_links[carrier_pid]
+	var target: Node = _find_climber_by_id(int(link.get("target_id", -1)))
+	if (
+		carrier == null or target == null
+		or not is_strong_climber(carrier)
+		or not is_elastic_climber(target)
+		or bool(target.get("unconscious"))
+	):
+		return
+	_clear_carry_link(carrier_pid, true)
+	_notify("ELASTIC THROWN")
+
+
 func request_drop() -> void:
 	if _is_authority():
 		_authorize_drop(_local_id)
